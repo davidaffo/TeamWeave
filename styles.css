@@ -108,6 +108,30 @@ body {
   margin-top: 1rem;
 }
 
+.export-box {
+  margin-top: 1.2rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.export-box label {
+  font-weight: 600;
+}
+
+.export-row {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.export-row input {
+  flex: 1 1 260px;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: #fdfcf8;
+}
+
 input[type="file"] {
   flex: 1 1 250px;
   padding: 0.6rem;
@@ -228,6 +252,27 @@ button:hover {
   z-index: 1;
 }
 
+.matrix-table thead .sticky-right {
+  position: sticky;
+  right: 0;
+  background: #f7f1e4;
+  z-index: 3;
+}
+
+.matrix-table tbody .sticky-right {
+  position: sticky;
+  right: 0;
+  background: #fffefb;
+  z-index: 1;
+}
+
+.matrix-table tfoot .sticky-right {
+  position: sticky;
+  right: 0;
+  background: #f1e7d2;
+  z-index: 2;
+}
+
 .matrix-table tfoot th,
 .matrix-table tfoot td {
   background: #f1e7d2;
@@ -237,6 +282,104 @@ button:hover {
 .note {
   color: var(--muted);
   margin-bottom: 1rem;
+}
+
+.responses-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.response-card {
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: #fffefb;
+  padding: 0.8rem 1rem;
+}
+
+.response-card summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.response-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.response-meta {
+  display: flex;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.response-grid {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.response-group {
+  border-left: 3px solid var(--border);
+  padding-left: 0.8rem;
+}
+
+.response-group h4 {
+  margin: 0 0 0.4rem;
+}
+
+.response-group ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.response-items {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.response-item {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(200px, 1fr);
+  gap: 0.8rem;
+  align-items: start;
+  padding: 0.5rem 0.6rem;
+  border-radius: 0.6rem;
+  background: #f9f4ea;
+}
+
+.response-item.positive {
+  background: #e4f5e6;
+}
+
+.response-item.negative {
+  background: #fde3e3;
+}
+
+.response-question {
+  font-weight: 600;
+}
+
+.response-answer {
+  color: var(--muted);
+}
+
+.response-answer.empty {
+  color: #9b8f7a;
+  font-style: italic;
+}
+
+.response-pill {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  background: #f1e7d2;
+  margin-left: 0.4rem;
 }
 
 .network {

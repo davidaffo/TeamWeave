@@ -4,6 +4,11 @@
   const summaryEl = document.getElementById("summary");
   const viewsEl = document.getElementById("views");
   const viewContainer = document.getElementById("view-container");
+  const exportLinkBtn = document.getElementById("export-link-btn");
+  const exportCsvBtn = document.getElementById("export-csv-btn");
+  const exportBox = document.getElementById("export-box");
+  const exportLinkInput = document.getElementById("export-link");
+  const copyLinkBtn = document.getElementById("copy-link-btn");
   const tabs = Array.from(document.querySelectorAll(".tab"));
 
   const CATEGORY_MAP = new Map([
@@ -49,6 +54,17 @@
 
   const renderers = new Map();
   let currentAnalysis = null;
+  const STORAGE_KEY = "teamweave:lastCsv";
+  const VIEW_KEY = "teamweave:lastView";
+  const LINK_PARAM = "data";
+  const PALETTE = {
+    posMatrix: ["#ffffff", "#00a933"],
+    posTotals: ["#ffffff", "#81d41a"],
+    negMatrix: ["#ffffff", "#ff0000"],
+    negTotals: ["#ffffff", "#800080"],
+    nonRic: ["#ffffff", "#ff8000"],
+    network: ["#d73027", "#fee08b", "#1a9850"]
+  };
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
@@ -64,6 +80,44 @@
     readFile(file);
   });
 
+  exportLinkBtn.addEventListener("click", () => {
+    if (!currentAnalysis) {
+      setStatus("Carica un CSV prima di creare il link.", true);
+      return;
+    }
+    const csv = localStorage.getItem(STORAGE_KEY);
+    if (!csv) {
+      setStatus("Nessun CSV salvato in memoria.", true);
+      return;
+    }
+    const encoded = base64UrlEncode(csv);
+    const url = `${location.origin}${location.pathname}#${LINK_PARAM}=${encoded}`;
+    exportLinkInput.value = url;
+    exportBox.classList.remove("hidden");
+  });
+
+  copyLinkBtn.addEventListener("click", async () => {
+    const value = exportLinkInput.value;
+    if (!value) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      setStatus("Link copiato negli appunti.", false);
+    } catch (error) {
+      setStatus("Impossibile copiare il link.", true);
+    }
+  });
+
+  exportCsvBtn.addEventListener("click", () => {
+    const csv = localStorage.getItem(STORAGE_KEY);
+    if (!csv) {
+      setStatus("Nessun CSV salvato in memoria.", true);
+      return;
+    }
+    downloadCsv(csv);
+  });
+
 
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -73,9 +127,13 @@
       tabs.forEach((btn) => btn.classList.remove("active"));
       tab.classList.add("active");
       const view = tab.dataset.view;
+      saveView(view);
       renderView(view);
     });
   });
+
+  restoreFromLink();
+  restoreCsv();
 
   function readFile(file) {
     const reader = new FileReader();
@@ -93,12 +151,16 @@
       const { headers, rows } = parseCsv(text);
       const analysis = analyzeData(headers, rows);
       currentAnalysis = analysis;
+      saveCsv(text);
       updateSummary(analysis);
       summaryEl.classList.remove("hidden");
       viewsEl.classList.remove("hidden");
-      renderView("matrix-pos");
+      const restored = restoreView();
+      const selectedView = restored || "responses";
+      renderView(selectedView);
       tabs.forEach((btn) => btn.classList.remove("active"));
-      tabs[0].classList.add("active");
+      const activeTab = tabs.find((btn) => btn.dataset.view === selectedView) || tabs[0];
+      activeTab.classList.add("active");
       setStatus(`Caricato: ${analysis.rows.length} risposte, ${analysis.names.length} atlete.`, false);
     } catch (error) {
       setStatus(error.message, true);
@@ -108,6 +170,58 @@
   function setStatus(message, isError) {
     statusEl.textContent = message;
     statusEl.classList.toggle("error", isError);
+  }
+
+  function saveView(view) {
+    try {
+      localStorage.setItem(VIEW_KEY, view);
+    } catch (error) {
+      return;
+    }
+  }
+
+  function restoreView() {
+    try {
+      const cached = localStorage.getItem(VIEW_KEY);
+      if (!cached) {
+        return null;
+      }
+      const valid = tabs.some((tab) => tab.dataset.view === cached);
+      return valid ? cached : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveCsv(text) {
+    try {
+      localStorage.setItem(STORAGE_KEY, text);
+    } catch (error) {
+      setStatus("Memoria del browser piena: impossibile salvare i dati.", true);
+    }
+  }
+
+  function restoreCsv() {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY);
+      if (cached) {
+        loadCsv(cached);
+      }
+    } catch (error) {
+      return;
+    }
+  }
+
+  function restoreFromLink() {
+    const hash = location.hash.replace(/^#/, "");
+    if (!hash.startsWith(`${LINK_PARAM}=`)) {
+      return;
+    }
+    const encoded = hash.slice(LINK_PARAM.length + 1);
+    const decoded = base64UrlDecode(encoded);
+    if (decoded) {
+      loadCsv(decoded);
+    }
   }
 
   function parseCsv(text) {
@@ -655,8 +769,16 @@
             analysis.totals.posRowSum,
             analysis.totals.posColSum,
             "Totale scelte fatte",
+            {
+              matrix: { palette: PALETTE.posMatrix, scope: "matrix" },
+              totals: { palette: PALETTE.posTotals, scope: "totals" }
+            },
             true
           ));
+        };
+      case "responses":
+        return (analysis, container) => {
+          container.appendChild(renderResponsesSection(analysis));
         };
       case "matrix-neg":
         return (analysis, container) => {
@@ -668,6 +790,10 @@
             analysis.totals.negRowSum,
             analysis.totals.negColSum,
             "Totale scelte fatte",
+            {
+              matrix: { palette: PALETTE.negMatrix, scope: "matrix" },
+              totals: { palette: PALETTE.negTotals, scope: "totals" }
+            },
             true
           ));
         };
@@ -677,7 +803,11 @@
             "Reciproci positivi",
             "1 indica una scelta reciproca positiva.",
             analysis.names,
-            analysis.matrices.reciprociPos
+            analysis.matrices.reciprociPos,
+            {
+              matrix: { palette: PALETTE.posMatrix, scope: "matrix" },
+              totals: { palette: PALETTE.posTotals, scope: "totals" }
+            }
           ));
         };
       case "reciproci-neg":
@@ -686,7 +816,11 @@
             "Reciproci negativi",
             "1 indica un reciproco negativo.",
             analysis.names,
-            analysis.matrices.reciprociNeg
+            analysis.matrices.reciprociNeg,
+            {
+              matrix: { palette: PALETTE.negMatrix, scope: "matrix" },
+              totals: { palette: PALETTE.negTotals, scope: "totals" }
+            }
           ));
         };
       case "forza-legami":
@@ -699,6 +833,10 @@
             analysis.totals.forzaLegamiRowSum,
             null,
             "Totale forza",
+            {
+              matrix: { palette: PALETTE.posMatrix, scope: "combined" },
+              totals: { palette: PALETTE.posMatrix, scope: "combined" }
+            },
             false
           ));
         };
@@ -712,6 +850,10 @@
             analysis.totals.forzaAntagonismoRowSum,
             null,
             "Totale forza",
+            {
+              matrix: { palette: PALETTE.negMatrix, scope: "combined" },
+              totals: { palette: PALETTE.negMatrix, scope: "combined" }
+            },
             false
           ));
         };
@@ -725,6 +867,10 @@
             analysis.totals.nonRicambiateRowSum,
             analysis.totals.nonRicambiateColSum,
             "Positive date e non ricambiate",
+            {
+              matrix: { palette: PALETTE.nonRic, scope: "combined" },
+              totals: { palette: PALETTE.nonRic, scope: "combined" }
+            },
             true
           ));
         };
@@ -741,7 +887,7 @@
     }
   }
 
-  function renderMatrixSection(title, description, names, matrix, rowTotals, colTotals, totalLabel, includeTotalsRow) {
+  function renderMatrixSection(title, description, names, matrix, rowTotals, colTotals, totalLabel, colorConfig, includeTotalsRow) {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
     heading.textContent = title;
@@ -768,12 +914,14 @@
 
     const totalTh = document.createElement("th");
     totalTh.textContent = totalLabel;
+    totalTh.classList.add("sticky-right");
     headerRow.appendChild(totalTh);
 
     thead.appendChild(headerRow);
     table.appendChild(thead);
 
     const tbody = document.createElement("tbody");
+    const minMax = getMinMaxConfig(matrix, rowTotals, colTotals, colorConfig);
     matrix.forEach((row, i) => {
       const tr = document.createElement("tr");
       const rowHeader = document.createElement("th");
@@ -783,11 +931,20 @@
       row.forEach((cell) => {
         const td = document.createElement("td");
         td.textContent = cell;
+        if (colorConfig?.matrix) {
+          const range = minMax.matrix;
+          applyHeatmap(td, cell, range.min, range.max, colorConfig.matrix.palette);
+        }
         tr.appendChild(td);
       });
 
       const total = document.createElement("td");
       total.textContent = rowTotals[i];
+      total.classList.add("sticky-right");
+      if (colorConfig?.totals) {
+        const range = minMax.totals;
+        applyHeatmap(total, rowTotals[i], range.min, range.max, colorConfig.totals.palette);
+      }
       tr.appendChild(total);
 
       tbody.appendChild(tr);
@@ -804,11 +961,16 @@
       colTotals.forEach((value) => {
         const td = document.createElement("td");
         td.textContent = value;
+        if (colorConfig?.totals) {
+          const range = minMax.totals;
+          applyHeatmap(td, value, range.min, range.max, colorConfig.totals.palette);
+        }
         tr.appendChild(td);
       });
 
       const total = document.createElement("td");
       total.textContent = colTotals.reduce((acc, value) => acc + value, 0);
+      total.classList.add("sticky-right");
       tr.appendChild(total);
 
       tfoot.appendChild(tr);
@@ -823,7 +985,7 @@
     return section;
   }
 
-  function renderReciprociSection(title, description, names, matrix) {
+  function renderReciprociSection(title, description, names, matrix, colorConfig) {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
     heading.textContent = title;
@@ -849,6 +1011,7 @@
 
     const totalTh = document.createElement("th");
     totalTh.textContent = "Totale reciprocità";
+    totalTh.classList.add("sticky-right");
     headerRow.appendChild(totalTh);
 
     const idxTh = document.createElement("th");
@@ -860,11 +1023,13 @@
 
     const tbody = document.createElement("tbody");
     const rowTotals = sumRows(matrix);
+    const colTotals = sumColumns(matrix);
     const reciprocalIndex = rowTotals.map((total, idx) => {
       const denom = matrix.length - 1;
       return denom > 0 ? total / denom : 0;
     });
 
+    const minMax = getMinMaxConfig(matrix, rowTotals, colTotals, colorConfig);
     matrix.forEach((row, i) => {
       const tr = document.createElement("tr");
       const rowHeader = document.createElement("th");
@@ -874,15 +1039,24 @@
       row.forEach((cell) => {
         const td = document.createElement("td");
         td.textContent = cell;
+        if (colorConfig?.matrix) {
+          const range = minMax.matrix;
+          applyHeatmap(td, cell, range.min, range.max, colorConfig.matrix.palette);
+        }
         tr.appendChild(td);
       });
 
       const total = document.createElement("td");
       total.textContent = rowTotals[i];
+      total.classList.add("sticky-right");
+      if (colorConfig?.totals) {
+        const range = minMax.totals;
+        applyHeatmap(total, rowTotals[i], range.min, range.max, colorConfig.totals.palette);
+      }
       tr.appendChild(total);
 
       const idxCell = document.createElement("td");
-      idxCell.textContent = formatNumber(reciprocalIndex[i]);
+      idxCell.textContent = formatPercent(reciprocalIndex[i]);
       tr.appendChild(idxCell);
 
       tbody.appendChild(tr);
@@ -896,21 +1070,25 @@
     label.textContent = "Totali";
     tr.appendChild(label);
 
-    const colTotals = sumColumns(matrix);
     colTotals.forEach((value) => {
       const td = document.createElement("td");
       td.textContent = value;
+      if (colorConfig?.totals) {
+        const range = minMax.totals;
+        applyHeatmap(td, value, range.min, range.max, colorConfig.totals.palette);
+      }
       tr.appendChild(td);
     });
 
     const totalSum = rowTotals.reduce((acc, value) => acc + value, 0);
     const totalCell = document.createElement("td");
     totalCell.textContent = totalSum;
+    totalCell.classList.add("sticky-right");
     tr.appendChild(totalCell);
 
     const avgIdx = reciprocalIndex.reduce((acc, value) => acc + value, 0) / reciprocalIndex.length;
     const avgCell = document.createElement("td");
-    avgCell.textContent = formatNumber(avgIdx);
+    avgCell.textContent = formatPercent(avgIdx);
     tr.appendChild(avgCell);
 
     tfoot.appendChild(tr);
@@ -1037,6 +1215,8 @@
     wrapper.appendChild(table);
     section.appendChild(wrapper);
 
+    applySummaryColors(table, analysis);
+
     const classHeading = document.createElement("h3");
     classHeading.textContent = "Classificazione";
     classHeading.style.marginTop = "2rem";
@@ -1060,6 +1240,15 @@
       [row.name, row.inflPos, row.inflNeg, row.equilibrio, row.label].forEach((value, idx) => {
         const cell = idx === 0 ? document.createElement("th") : document.createElement("td");
         cell.textContent = value;
+        if (idx === 1) {
+          applyLabelFill(cell, value, "positive");
+        } else if (idx === 2) {
+          applyLabelFill(cell, value, "negative");
+        } else if (idx === 3) {
+          applyEquilibrioFill(cell, value);
+        } else if (idx === 4) {
+          applyEtichettaFill(cell, value);
+        }
         tr.appendChild(cell);
       });
       classBody.appendChild(tr);
@@ -1074,6 +1263,137 @@
     return section;
   }
 
+  function renderResponsesSection(analysis) {
+    const section = document.createElement("div");
+    const heading = document.createElement("h2");
+    heading.textContent = "Risposte del modulo";
+    section.appendChild(heading);
+
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "Naviga per atleta e consulta tutte le risposte organizzate per categoria.";
+    section.appendChild(note);
+
+    const list = document.createElement("div");
+    list.className = "responses-list";
+    section.appendChild(list);
+
+    const responseData = buildResponsesData(analysis);
+
+    list.innerHTML = "";
+    responseData.forEach((item) => {
+      const details = document.createElement("details");
+      details.className = "response-card";
+
+      const summary = document.createElement("summary");
+      const title = document.createElement("span");
+      title.textContent = item.name;
+      const meta = document.createElement("span");
+      meta.className = "response-meta";
+      meta.textContent = `${item.counts.positive} positive · ${item.counts.negative} negative`;
+      summary.appendChild(title);
+      summary.appendChild(meta);
+      details.appendChild(summary);
+
+      const grid = document.createElement("div");
+      grid.className = "response-grid";
+
+      item.groups.forEach((group) => {
+        const groupEl = document.createElement("div");
+        groupEl.className = "response-group";
+        const h4 = document.createElement("h4");
+        h4.textContent = group.title;
+        const pill = document.createElement("span");
+        pill.className = "response-pill";
+        pill.textContent = group.count;
+        h4.appendChild(pill);
+        groupEl.appendChild(h4);
+
+        const items = document.createElement("div");
+        items.className = "response-items";
+        group.items.forEach((entry) => {
+          const row = document.createElement("div");
+          row.className = `response-item ${entry.sentiment || ""}`.trim();
+
+          const question = document.createElement("div");
+          question.className = "response-question";
+          question.textContent = entry.question;
+
+          const answer = document.createElement("div");
+          answer.className = "response-answer";
+          if (entry.answer) {
+            answer.textContent = entry.answer;
+          } else {
+            answer.textContent = "Nessuna risposta";
+            answer.classList.add("empty");
+          }
+
+          row.appendChild(question);
+          row.appendChild(answer);
+          items.appendChild(row);
+        });
+        groupEl.appendChild(items);
+        grid.appendChild(groupEl);
+      });
+
+      details.appendChild(grid);
+      list.appendChild(details);
+    });
+
+    return section;
+  }
+
+  function buildResponsesData(analysis) {
+    const nameIndex = findNameColumn(analysis.headers);
+    const firstQuestionIndex = nameIndex + 1;
+    const data = [];
+
+    analysis.rows.forEach((row) => {
+      const name = row[nameIndex] || "Senza nome";
+      const groups = [];
+      const counts = { positive: 0, negative: 0 };
+
+      const grouped = {
+        Tecniche: [],
+        Attitudinali: [],
+        Sociali: [],
+        Altro: []
+      };
+
+      analysis.questionMeta.forEach((meta, idx) => {
+        const answer = row[firstQuestionIndex + idx] || "";
+        const category = meta.category || "Altro";
+        const sentiment = meta.positive ? "positive" : "negative";
+        grouped[category].push({ question: meta.question, answer, sentiment });
+        if (meta.positive) {
+          counts.positive += answer ? 1 : 0;
+        } else {
+          counts.negative += answer ? 1 : 0;
+        }
+      });
+
+      Object.keys(grouped).forEach((category) => {
+        const items = grouped[category];
+        if (!items.length) {
+          return;
+        }
+        groups.push({
+          title: category,
+          count: items.length,
+          items
+        });
+      });
+
+      data.push({
+        name,
+        groups,
+        counts
+      });
+    });
+
+    return data;
+  }
+
   function renderNetworkSection(analysis) {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
@@ -1084,6 +1404,23 @@
     note.className = "note";
     note.textContent = "Il grafo mostra solo i legami reciproci positivi.";
     section.appendChild(note);
+
+    const controls = document.createElement("div");
+    controls.className = "note";
+    const label = document.createElement("label");
+    label.style.display = "inline-flex";
+    label.style.gap = "0.5rem";
+    label.style.alignItems = "center";
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.checked = true;
+    toggle.id = "link-strength-toggle";
+    const text = document.createElement("span");
+    text.textContent = "Colora i legami in base alla forza";
+    label.appendChild(toggle);
+    label.appendChild(text);
+    controls.appendChild(label);
+    section.appendChild(controls);
 
     const network = document.createElement("div");
     network.className = "network";
@@ -1111,22 +1448,38 @@
     network.appendChild(list);
 
     section.appendChild(network);
-    drawNetwork(canvas, analysis.names, analysis.matrices.reciprociPos);
+    initNetwork(
+      canvas,
+      analysis.names,
+      analysis.matrices.reciprociPos,
+      analysis.matrices.forzaLegami,
+      toggle
+    );
 
     return section;
   }
 
-  function drawNetwork(canvas, names, matrix) {
+  function initNetwork(canvas, names, matrix, strengthMatrix, toggleEl) {
     const ctx = canvas.getContext("2d");
     const width = canvas.width;
     const height = canvas.height;
 
-    const nodes = names.map((name) => ({ name }));
+    const state = createNetworkState(names, matrix, strengthMatrix, width, height);
+    canvas._networkState = state;
+    drawNetwork(ctx, state);
+    attachNetworkHandlers(canvas);
+    attachNetworkToggle(canvas, toggleEl);
+  }
+
+  function createNetworkState(names, matrix, strengthMatrix, width, height) {
+    const nodes = names.map((name) => ({ name, x: 0, y: 0 }));
     const edges = [];
+    const strengths = [];
     for (let i = 0; i < matrix.length; i += 1) {
       for (let j = i + 1; j < matrix.length; j += 1) {
         if (matrix[i][j] > 0) {
           edges.push([i, j]);
+          strengths.push(strengthMatrix?.[i]?.[j] || 0);
         }
       }
     }
@@ -1136,11 +1489,34 @@
     const degrees = nodes.map((_, idx) => edges.filter((e) => e[0] === idx || e[1] === idx).length);
     const maxDegree = Math.max(...degrees, 1);
 
-    ctx.clearRect(0, 0, width, height);
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.2)";
-    ctx.lineWidth = 1;
+    const strengthRange = minMaxArray(strengths);
+    return {
+      nodes,
+      edges,
+      strengths,
+      strengthRange,
+      degrees,
+      maxDegree,
+      width,
+      height,
+      dragIndex: null,
+      showStrength: true
+    };
+  }
 
-    edges.forEach(([i, j]) => {
+  function drawNetwork(ctx, state) {
+    const { nodes, edges, degrees, maxDegree, width, height, strengths, strengthRange, showStrength } = state;
+    ctx.clearRect(0, 0, width, height);
+    ctx.lineWidth = 1.2;
+
+    edges.forEach(([i, j], idx) => {
+      if (showStrength) {
+        const value = strengths[idx] || 0;
+        const t = strengthRange.min === strengthRange.max ? 0 : (value - strengthRange.min) / (strengthRange.max - strengthRange.min);
+        ctx.strokeStyle = interpolateBi(["#d5d8dc", "#1a9850"], t);
+      } else {
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.2)";
+      }
       ctx.beginPath();
       ctx.moveTo(nodes[i].x, nodes[i].y);
       ctx.lineTo(nodes[j].x, nodes[j].y);
@@ -1151,10 +1527,10 @@
       const degree = degrees[idx];
       const radius = 8 + (degree / maxDegree) * 16;
       const t = degree / maxDegree;
-      const hue = 120 * t;
+      const color = interpolateTri(PALETTE.network, t);
 
       ctx.beginPath();
-      ctx.fillStyle = `hsl(${hue}, 65%, 45%)`;
+      ctx.fillStyle = color;
       ctx.strokeStyle = "#111";
       ctx.lineWidth = 1.2;
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
@@ -1165,6 +1541,77 @@
       ctx.font = "12px Trebuchet MS";
       ctx.textAlign = "center";
       ctx.fillText(node.name, node.x, node.y - radius - 6);
+    });
+  }
+
+  function attachNetworkHandlers(canvas) {
+    const state = canvas._networkState;
+    if (!state || canvas._networkHandlersAttached) {
+      return;
+    }
+    canvas._networkHandlersAttached = true;
+    const ctx = canvas.getContext("2d");
+
+    const getPointer = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+        y: ((event.clientY - rect.top) / rect.height) * canvas.height
+      };
+    };
+
+    const findNodeAt = (x, y) => {
+      for (let i = state.nodes.length - 1; i >= 0; i -= 1) {
+        const node = state.nodes[i];
+        const degree = state.degrees[i];
+        const radius = 8 + (degree / state.maxDegree) * 16;
+        const dist = Math.hypot(node.x - x, node.y - y);
+        if (dist <= radius + 6) {
+          return i;
+        }
+      }
+      return null;
+    };
+
+    const onDown = (event) => {
+      const { x, y } = getPointer(event);
+      const idx = findNodeAt(x, y);
+      if (idx !== null) {
+        state.dragIndex = idx;
+        state.dragOffset = { x: state.nodes[idx].x - x, y: state.nodes[idx].y - y };
+      }
+    };
+
+    const onMove = (event) => {
+      if (state.dragIndex === null) {
+        return;
+      }
+      const { x, y } = getPointer(event);
+      const node = state.nodes[state.dragIndex];
+      node.x = Math.min(state.width - 20, Math.max(20, x + state.dragOffset.x));
+      node.y = Math.min(state.height - 20, Math.max(20, y + state.dragOffset.y));
+      drawNetwork(ctx, state);
+    };
+
+    const onUp = () => {
+      state.dragIndex = null;
+    };
+
+    canvas.addEventListener("mousedown", onDown);
+    canvas.addEventListener("mousemove", onMove);
+    canvas.addEventListener("mouseup", onUp);
+    canvas.addEventListener("mouseleave", onUp);
+  }
+
+  function attachNetworkToggle(canvas, toggleEl) {
+    const state = canvas._networkState;
+    if (!state || !toggleEl) {
+      return;
+    }
+    toggleEl.addEventListener("change", () => {
+      state.showStrength = toggleEl.checked;
+      const ctx = canvas.getContext("2d");
+      drawNetwork(ctx, state);
     });
   }
 
@@ -1267,5 +1714,296 @@
       return "0";
     }
     return value % 1 === 0 ? value.toString() : value.toFixed(2);
+  }
+
+  function formatPercent(value) {
+    if (!Number.isFinite(value)) {
+      return "0%";
+    }
+    const percent = value * 100;
+    const formatted = percent % 1 === 0 ? percent.toString() : percent.toFixed(1);
+    return `${formatted}%`;
+  }
+
+  function downloadCsv(csv) {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "teamweave-data.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function base64UrlEncode(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    bytes.forEach((b) => {
+      binary += String.fromCharCode(b);
+    });
+    const base64 = btoa(binary);
+    return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function base64UrlDecode(text) {
+    try {
+      const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, "=");
+      const binary = atob(padded);
+      const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    } catch (error) {
+      setStatus("Link dati non valido.", true);
+      return null;
+    }
+  }
+
+  function minMaxArray(values) {
+    if (!values.length) {
+      return { min: 0, max: 0 };
+    }
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    values.forEach((value) => {
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    });
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      return { min: 0, max: 0 };
+    }
+    return { min, max };
+  }
+
+  function flattenMatrix(matrix) {
+    return matrix.reduce((acc, row) => acc.concat(row), []);
+  }
+
+  function getMinMaxConfig(matrix, rowTotals, colTotals, colorConfig) {
+    const matrixValues = flattenMatrix(matrix);
+    const totalsValues = []
+      .concat(rowTotals || [])
+      .concat(colTotals || []);
+    const combinedValues = matrixValues.concat(totalsValues);
+
+    const matrixRange = minMaxArray(matrixValues);
+    const totalsRange = minMaxArray(totalsValues);
+    const combinedRange = minMaxArray(combinedValues);
+
+    const pickRange = (scope) => {
+      if (scope === "combined") {
+        return combinedRange;
+      }
+      if (scope === "totals") {
+        return totalsRange;
+      }
+      return matrixRange;
+    };
+
+    return {
+      matrix: pickRange(colorConfig?.matrix?.scope || "matrix"),
+      totals: pickRange(colorConfig?.totals?.scope || "totals")
+    };
+  }
+
+  function applyHeatmap(cell, value, min, max, palette) {
+    if (!palette) {
+      return;
+    }
+    const t = min === max ? 0 : (value - min) / (max - min);
+    const color = palette.length === 2 ? interpolateBi(palette, t) : interpolateTri(palette, t);
+    cell.style.backgroundColor = color;
+    cell.style.color = textColorFor(color);
+  }
+
+  function applySummaryColors(table, analysis) {
+    const dataRows = Array.from(table.querySelectorAll("tbody tr"));
+    const values = analysis.summaryRows;
+    if (!dataRows.length) {
+      return;
+    }
+
+    const columns = [
+      { index: 1, palette: PALETTE.posMatrix },
+      { index: 2, palette: PALETTE.posMatrix },
+      { index: 3, palette: PALETTE.posMatrix },
+      { index: 4, palette: PALETTE.posMatrix },
+      { index: 5, palette: PALETTE.negMatrix },
+      { index: 6, palette: PALETTE.negMatrix },
+      { index: 7, palette: PALETTE.negMatrix },
+      { index: 8, palette: PALETTE.negMatrix },
+      { index: 9, palette: PALETTE.posMatrix },
+      { index: 10, palette: PALETTE.negMatrix },
+      { index: 11, palette: PALETTE.posMatrix },
+      { index: 12, palette: PALETTE.negMatrix },
+      { index: 13, palette: PALETTE.posMatrix },
+      { index: 14, palette: PALETTE.negMatrix },
+      { index: 15, palette: PALETTE.nonRic },
+      { index: 16, palette: PALETTE.nonRic }
+    ];
+
+    const columnValues = new Map();
+    columns.forEach(({ index }) => {
+      columnValues.set(index, values.map((row) => getSummaryValue(row, index)));
+    });
+
+    const columnRanges = new Map();
+    columnValues.forEach((vals, index) => {
+      columnRanges.set(index, minMaxArray(vals));
+    });
+
+    dataRows.forEach((row, rowIndex) => {
+      const cells = row.querySelectorAll("th, td");
+      columns.forEach(({ index, palette }) => {
+        const cell = cells[index];
+        if (!cell) {
+          return;
+        }
+        const value = getSummaryValue(values[rowIndex], index);
+        const range = columnRanges.get(index);
+        applyHeatmap(cell, value, range.min, range.max, palette);
+      });
+    });
+  }
+
+  function getSummaryValue(row, index) {
+    switch (index) {
+      case 1:
+        return row.positiveReceived.Tecniche;
+      case 2:
+        return row.positiveReceived.Attitudinali;
+      case 3:
+        return row.positiveReceived.Sociali;
+      case 4:
+        return row.positiveReceived.Totali;
+      case 5:
+        return row.negativeReceived.Tecniche;
+      case 6:
+        return row.negativeReceived.Attitudinali;
+      case 7:
+        return row.negativeReceived.Sociali;
+      case 8:
+        return row.negativeReceived.Totali;
+      case 9:
+        return row.positiveGiven;
+      case 10:
+        return row.negativeGiven;
+      case 11:
+        return row.reciprociPos;
+      case 12:
+        return row.reciprociNeg;
+      case 13:
+        return row.forzaLegami;
+      case 14:
+        return row.forzaAntagonismo;
+      case 15:
+        return row.nonRicambiateDate;
+      case 16:
+        return row.nonRicambiateRicevute;
+      default:
+        return 0;
+    }
+  }
+
+  function applyLabelFill(cell, value, mode) {
+    const normalized = value.toLowerCase();
+    if (mode === "positive") {
+      if (normalized === "alta") {
+        setCellFill(cell, "#ccffcc");
+      } else if (normalized === "media") {
+        setCellFill(cell, "#ffffcc");
+      } else if (normalized === "bassa") {
+        setCellFill(cell, "#ffcccc");
+      }
+      return;
+    }
+
+    if (normalized === "alta") {
+      setCellFill(cell, "#ffcccc");
+    } else if (normalized === "media") {
+      setCellFill(cell, "#ffffcc");
+    } else if (normalized === "bassa") {
+      setCellFill(cell, "#ccffcc");
+    }
+  }
+
+  function applyEquilibrioFill(cell, value) {
+    const normalized = value.toLowerCase();
+    if (normalized === "selettiva") {
+      setCellFill(cell, "#ffffcc");
+    } else if (normalized === "bilanciata") {
+      setCellFill(cell, "#ccffcc");
+    } else if (normalized === "ignorata") {
+      setCellFill(cell, "#ffcccc");
+    }
+  }
+
+  function applyEtichettaFill(cell, value) {
+    const normalized = value.toLowerCase();
+    const positiveHints = ["leader positiva", "leader silenziosa", "leader", "stimata", "benvoluta", "apprezzata", "figura di riferimento"];
+    const neutralHints = ["neutrale", "bilanciata", "presenza discreta"];
+    const negativeHints = ["controversa", "esclusa", "invisibile", "marginale", "trascurata", "non considerata", "dispersa"];
+
+    if (positiveHints.some((hint) => normalized.includes(hint))) {
+      setCellFill(cell, "#ccffcc");
+      return;
+    }
+    if (negativeHints.some((hint) => normalized.includes(hint))) {
+      setCellFill(cell, "#ffcccc");
+      return;
+    }
+    if (neutralHints.some((hint) => normalized.includes(hint))) {
+      setCellFill(cell, "#ffffcc");
+    }
+  }
+
+  function setCellFill(cell, color) {
+    cell.style.backgroundColor = color;
+    cell.style.color = "#1c201a";
+  }
+
+  function interpolateBi(colors, t) {
+    const [a, b] = colors;
+    return mixHex(a, b, t);
+  }
+
+  function interpolateTri(colors, t) {
+    const [a, b, c] = colors;
+    if (t <= 0.5) {
+      return mixHex(a, b, t / 0.5);
+    }
+    return mixHex(b, c, (t - 0.5) / 0.5);
+  }
+
+  function mixHex(a, b, t) {
+    const ca = hexToRgb(a);
+    const cb = hexToRgb(b);
+    const r = Math.round(ca.r + (cb.r - ca.r) * t);
+    const g = Math.round(ca.g + (cb.g - ca.g) * t);
+    const bVal = Math.round(ca.b + (cb.b - ca.b) * t);
+    return `rgb(${r}, ${g}, ${bVal})`;
+  }
+
+  function hexToRgb(hex) {
+    const clean = hex.replace("#", "");
+    const num = parseInt(clean, 16);
+    return {
+      r: (num >> 16) & 255,
+      g: (num >> 8) & 255,
+      b: num & 255
+    };
+  }
+
+  function textColorFor(rgb) {
+    const match = rgb.match(/rgb\\((\\d+),\\s*(\\d+),\\s*(\\d+)\\)/);
+    if (!match) {
+      return "#1c201a";
+    }
+    const r = Number(match[1]);
+    const g = Number(match[2]);
+    const b = Number(match[3]);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.65 ? "#1c201a" : "#fdfcf8";
   }
 })();

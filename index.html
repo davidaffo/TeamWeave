@@ -17,10 +17,6 @@
       <h1>TeamWeave</h1>
       <p class="subtitle">Carica il CSV del modulo e ottieni matrici, indicatori e rete dei reciproci positivi.</p>
     </div>
-    <div class="hero-badge">
-      <span>Modalita offline</span>
-      <strong>Pronta per il campo</strong>
-    </div>
   </header>
 
   <main class="main">
@@ -29,6 +25,18 @@
       <p>Il CSV deve avere le stesse colonne del primo foglio Excel (timestamp, nome, domande in ordine). Le colonne pari sono positive, le dispari negative.</p>
       <div class="upload-row">
         <input id="file-input" type="file" accept=".csv" />
+      </div>
+      <div class="upload-row">
+        <button id="export-link-btn" type="button">Crea link dati</button>
+        <button id="export-csv-btn" type="button">Scarica CSV</button>
+      </div>
+      <div id="export-box" class="export-box hidden">
+        <label for="export-link">Link dati</label>
+        <div class="export-row">
+          <input id="export-link" type="text" readonly />
+          <button id="copy-link-btn" type="button">Copia</button>
+        </div>
+        <p class="note">Il link contiene i dati del CSV. Condividilo solo con chi deve vederli.</p>
       </div>
       <div id="status" class="status" role="status"></div>
     </section>
@@ -54,7 +62,8 @@
 
     <section id="views" class="views hidden">
       <nav class="tabs" aria-label="Sezioni analisi">
-        <button class="tab active" data-view="matrix-pos">Matrice +</button>
+        <button class="tab active" data-view="responses">Risposte</button>
+        <button class="tab" data-view="matrix-pos">Matrice +</button>
         <button class="tab" data-view="matrix-neg">Matrice -</button>
         <button class="tab" data-view="reciproci-pos">Reciproci +</button>
         <button class="tab" data-view="reciproci-neg">Reciproci -</button>
@@ -65,7 +74,7 @@
         <button class="tab" data-view="rete">Rete reciproci +</button>
       </nav>
 
-      <section id="view-container" class="view-container"></section>
+    <section id="view-container" class="view-container"></section>
     </section>
   </main>
 
