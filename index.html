@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#183c2f">
+  <title>Sociometria Squadra</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-shapes" aria-hidden="true"></div>
+
+  <header class="hero">
+    <div class="hero-content">
+      <p class="eyebrow">PWA Offline</p>
+      <h1>Sociometria Squadra</h1>
+      <p class="subtitle">Carica il CSV del modulo e ottieni matrici, indicatori e rete dei reciproci positivi.</p>
+    </div>
+    <div class="hero-badge">
+      <span>Modalita offline</span>
+      <strong>Pronta per il campo</strong>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="panel upload-panel">
+      <h2>Caricamento dati</h2>
+      <p>Il CSV deve avere le stesse colonne del primo foglio Excel (timestamp, nome, domande in ordine). Le colonne pari sono positive, le dispari negative.</p>
+      <div class="upload-row">
+        <input id="file-input" type="file" accept=".csv" />
+      </div>
+      <div id="status" class="status" role="status"></div>
+    </section>
+
+    <section id="summary" class="summary hidden">
+      <div class="summary-card">
+        <span class="label">Risposte</span>
+        <strong id="summary-responses">0</strong>
+      </div>
+      <div class="summary-card">
+        <span class="label">Atlete</span>
+        <strong id="summary-athletes">0</strong>
+      </div>
+      <div class="summary-card">
+        <span class="label">Reciproci +</span>
+        <strong id="summary-reciproci">0</strong>
+      </div>
+      <div class="summary-card">
+        <span class="label">Media legami +</span>
+        <strong id="summary-legami">0</strong>
+      </div>
+    </section>
+
+    <section id="views" class="views hidden">
+      <nav class="tabs" aria-label="Sezioni analisi">
+        <button class="tab active" data-view="matrix-pos">Matrice +</button>
+        <button class="tab" data-view="matrix-neg">Matrice -</button>
+        <button class="tab" data-view="reciproci-pos">Reciproci +</button>
+        <button class="tab" data-view="reciproci-neg">Reciproci -</button>
+        <button class="tab" data-view="forza-legami">Forza legami</button>
+        <button class="tab" data-view="forza-antagonismo">Forza antagonismo</button>
+        <button class="tab" data-view="non-ricambiate">Positive non ricambiate</button>
+        <button class="tab" data-view="riassunto">Dati riassuntivi</button>
+        <button class="tab" data-view="rete">Rete reciproci +</button>
+      </nav>
+
+      <section id="view-container" class="view-container"></section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Analisi locale: i dati restano sul dispositivo.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

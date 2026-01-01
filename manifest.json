@@ -1,0 +1,17 @@
+{
+  "name": "Sociometria Squadra",
+  "short_name": "Sociometria",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f1e8",
+  "theme_color": "#183c2f",
+  "description": "Analisi sociometrica offline da CSV.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
