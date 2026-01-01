@@ -1,11 +1,11 @@
 {
-  "name": "Sociometria Squadra",
-  "short_name": "Sociometria",
+  "name": "TeamWeave",
+  "short_name": "TeamWeave",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f5f1e8",
   "theme_color": "#183c2f",
-  "description": "Analisi sociometrica offline da CSV.",
+  "description": "Analisi sociometrica offline da CSV con TeamWeave.",
   "icons": [
     {
       "src": "icon.svg",

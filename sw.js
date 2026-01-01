@@ -1,4 +1,4 @@
-const CACHE_NAME = "sociometria-pwa-v1";
+const CACHE_NAME = "teamweave-pwa-v1";
 const ASSETS = [
   "./",
   "./index.html",
