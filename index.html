@@ -26,22 +26,22 @@
       <div class="upload-row">
         <input id="file-input" type="file" accept=".csv" />
       </div>
-      <div class="paste-box">
-        <label for="paste-input">Oppure incolla il CSV</label>
-        <textarea id="paste-input" rows="6" placeholder="Incolla qui il contenuto del CSV..."></textarea>
-        <button id="paste-btn" type="button">Importa da testo</button>
-      </div>
       <div class="upload-row">
-        <button id="export-link-btn" type="button">Crea link dati</button>
+        <button id="export-link-btn" type="button">Genera codice dati</button>
         <button id="export-csv-btn" type="button">Scarica CSV</button>
       </div>
       <div id="export-box" class="export-box hidden">
-        <label for="export-link">Link dati</label>
+        <label for="export-link">Codice dati</label>
         <div class="export-row">
           <input id="export-link" type="text" readonly />
           <button id="copy-link-btn" type="button">Copia</button>
         </div>
-        <p class="note">Il link contiene i dati del CSV. Condividilo solo con chi deve vederli.</p>
+        <p class="note">Il codice contiene i dati del CSV. Condividilo solo con chi deve vederli.</p>
+      </div>
+      <div class="import-box">
+        <label for="import-code">Importa da codice</label>
+        <textarea id="import-code" rows="4" placeholder="Incolla qui il codice dati..."></textarea>
+        <button id="import-code-btn" type="button">Importa codice</button>
       </div>
       <div id="status" class="status" role="status"></div>
     </section>

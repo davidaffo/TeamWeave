@@ -108,27 +108,6 @@ body {
   margin-top: 1rem;
 }
 
-.paste-box {
-  margin-top: 1rem;
-  display: grid;
-  gap: 0.6rem;
-}
-
-.paste-box label {
-  font-weight: 600;
-}
-
-#paste-input {
-  width: 100%;
-  min-height: 140px;
-  padding: 0.8rem;
-  border-radius: 0.8rem;
-  border: 1px solid var(--border);
-  background: #fdfcf8;
-  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
-  resize: vertical;
-}
-
 .export-box {
   margin-top: 1.2rem;
   display: grid;
@@ -151,6 +130,27 @@ body {
   border-radius: 0.6rem;
   border: 1px solid var(--border);
   background: #fdfcf8;
+}
+
+.import-box {
+  margin-top: 1.2rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.import-box label {
+  font-weight: 600;
+}
+
+#import-code {
+  width: 100%;
+  min-height: 110px;
+  padding: 0.8rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--border);
+  background: #fdfcf8;
+  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+  resize: vertical;
 }
 
 input[type="file"] {

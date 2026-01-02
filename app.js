@@ -1,7 +1,7 @@
 (() => {
   const fileInput = document.getElementById("file-input");
-  const pasteInput = document.getElementById("paste-input");
-  const pasteBtn = document.getElementById("paste-btn");
+  const importCodeInput = document.getElementById("import-code");
+  const importCodeBtn = document.getElementById("import-code-btn");
   const statusEl = document.getElementById("status");
   const summaryEl = document.getElementById("summary");
   const viewsEl = document.getElementById("views");
@@ -82,13 +82,24 @@
     readFile(file);
   });
 
-  pasteBtn.addEventListener("click", () => {
-    const text = pasteInput.value;
-    if (!text || !text.trim()) {
-      setStatus("Incolla un CSV prima di importare.", true);
+  importCodeBtn.addEventListener("click", async () => {
+    const value = importCodeInput.value;
+    if (!value || !value.trim()) {
+      setStatus("Incolla un codice prima di importare.", true);
       return;
     }
-    loadCsv(text);
+    const decoded = await decodeLinkPayload(extractCode(value));
+    let csv = null;
+    if (decoded && decoded.kind === "bytes") {
+      csv = unpackCsvFromBinary(decoded.value);
+    } else if (decoded && decoded.kind === "text") {
+      csv = decodePackedCsv(decoded.value);
+    }
+    if (!csv) {
+      setStatus("Codice non valido.", true);
+      return;
+    }
+    loadCsv(csv);
   });
 
   exportLinkBtn.addEventListener("click", async () => {
@@ -108,8 +119,7 @@
       payload = csv;
     }
     const encoded = await encodeLinkPayload(payload);
-    const url = `${location.origin}${location.pathname}#${LINK_PARAM}=${encoded}`;
-    exportLinkInput.value = url;
+    exportLinkInput.value = encoded;
     exportBox.classList.remove("hidden");
   });
 
@@ -2431,5 +2441,18 @@
     const b = Number(match[3]);
     const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
     return luminance > 0.65 ? "#1c201a" : "#fdfcf8";
+  }
+
+  function extractCode(value) {
+    const trimmed = value.trim();
+    const match = trimmed.match(/#(?:[^=]*=)?(.+)$/);
+    if (match) {
+      return match[1];
+    }
+    if (trimmed.includes(`${LINK_PARAM}=`)) {
+      const parts = trimmed.split(`${LINK_PARAM}=`);
+      return parts[parts.length - 1].trim();
+    }
+    return trimmed;
   }
 })();
