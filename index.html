@@ -26,6 +26,11 @@
       <div class="upload-row">
         <input id="file-input" type="file" accept=".csv" />
       </div>
+      <div class="paste-box">
+        <label for="paste-input">Oppure incolla il CSV</label>
+        <textarea id="paste-input" rows="6" placeholder="Incolla qui il contenuto del CSV..."></textarea>
+        <button id="paste-btn" type="button">Importa da testo</button>
+      </div>
       <div class="upload-row">
         <button id="export-link-btn" type="button">Crea link dati</button>
         <button id="export-csv-btn" type="button">Scarica CSV</button>
@@ -43,20 +48,16 @@
 
     <section id="summary" class="summary hidden">
       <div class="summary-card">
-        <span class="label">Risposte</span>
-        <strong id="summary-responses">0</strong>
-      </div>
-      <div class="summary-card">
         <span class="label">Atlete</span>
         <strong id="summary-athletes">0</strong>
       </div>
-      <div class="summary-card">
-        <span class="label">Reciproci +</span>
-        <strong id="summary-reciproci">0</strong>
+      <div class="summary-card summary-card-pos">
+        <span class="label">Indice reciprocita +</span>
+        <strong id="summary-reciproci-pos">0%</strong>
       </div>
-      <div class="summary-card">
-        <span class="label">Media legami +</span>
-        <strong id="summary-legami">0</strong>
+      <div class="summary-card summary-card-neg">
+        <span class="label">Indice reciprocita -</span>
+        <strong id="summary-reciproci-neg">0%</strong>
       </div>
     </section>
 
@@ -71,7 +72,6 @@
         <button class="tab" data-view="forza-antagonismo">Forza antagonismo</button>
         <button class="tab" data-view="non-ricambiate">Positive non ricambiate</button>
         <button class="tab" data-view="riassunto">Dati riassuntivi</button>
-        <button class="tab" data-view="rete">Rete reciproci +</button>
       </nav>
 
     <section id="view-container" class="view-container"></section>

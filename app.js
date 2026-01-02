@@ -1,5 +1,7 @@
 (() => {
   const fileInput = document.getElementById("file-input");
+  const pasteInput = document.getElementById("paste-input");
+  const pasteBtn = document.getElementById("paste-btn");
   const statusEl = document.getElementById("status");
   const summaryEl = document.getElementById("summary");
   const viewsEl = document.getElementById("views");
@@ -80,7 +82,16 @@
     readFile(file);
   });
 
-  exportLinkBtn.addEventListener("click", () => {
+  pasteBtn.addEventListener("click", () => {
+    const text = pasteInput.value;
+    if (!text || !text.trim()) {
+      setStatus("Incolla un CSV prima di importare.", true);
+      return;
+    }
+    loadCsv(text);
+  });
+
+  exportLinkBtn.addEventListener("click", async () => {
     if (!currentAnalysis) {
       setStatus("Carica un CSV prima di creare il link.", true);
       return;
@@ -90,7 +101,13 @@
       setStatus("Nessun CSV salvato in memoria.", true);
       return;
     }
-    const encoded = base64UrlEncode(csv);
+    let payload = csv;
+    try {
+      payload = packCsvForLink(csv);
+    } catch (error) {
+      payload = csv;
+    }
+    const encoded = await encodeLinkPayload(payload);
     const url = `${location.origin}${location.pathname}#${LINK_PARAM}=${encoded}`;
     exportLinkInput.value = url;
     exportBox.classList.remove("hidden");
@@ -132,8 +149,7 @@
     });
   });
 
-  restoreFromLink();
-  restoreCsv();
+  initializeFromStorage();
 
   function readFile(file) {
     const reader = new FileReader();
@@ -148,10 +164,11 @@
 
   function loadCsv(text) {
     try {
-      const { headers, rows } = parseCsv(text);
+      const sanitized = text.replace(/^\uFEFF/, "");
+      const { headers, rows } = parseCsv(sanitized);
       const analysis = analyzeData(headers, rows);
       currentAnalysis = analysis;
-      saveCsv(text);
+      saveCsv(sanitized);
       updateSummary(analysis);
       summaryEl.classList.remove("hidden");
       viewsEl.classList.remove("hidden");
@@ -206,22 +223,32 @@
       const cached = localStorage.getItem(STORAGE_KEY);
       if (cached) {
         loadCsv(cached);
+        return true;
       }
     } catch (error) {
-      return;
+      return false;
     }
+    return false;
   }
 
-  function restoreFromLink() {
+  async function restoreFromLink() {
     const hash = location.hash.replace(/^#/, "");
     if (!hash.startsWith(`${LINK_PARAM}=`)) {
-      return;
+      return false;
     }
     const encoded = hash.slice(LINK_PARAM.length + 1);
-    const decoded = base64UrlDecode(encoded);
-    if (decoded) {
-      loadCsv(decoded);
+    const decoded = await decodeLinkPayload(encoded);
+    let csv = null;
+    if (decoded && decoded.kind === "bytes") {
+      csv = unpackCsvFromBinary(decoded.value);
+    } else if (decoded && decoded.kind === "text") {
+      csv = decodePackedCsv(decoded.value);
     }
+    if (csv) {
+      loadCsv(csv);
+      return true;
+    }
+    return false;
   }
 
   function parseCsv(text) {
@@ -727,11 +754,13 @@
   }
 
   function updateSummary(analysis) {
-    const reciprociTot = countReciprociPairs(analysis.matrices.reciprociPos);
-    document.getElementById("summary-responses").textContent = analysis.rows.length;
     document.getElementById("summary-athletes").textContent = analysis.names.length;
-    document.getElementById("summary-reciproci").textContent = reciprociTot;
-    document.getElementById("summary-legami").textContent = formatNumber(analysis.averages.forzaLegami);
+    document.getElementById("summary-reciproci-pos").textContent = formatPercent(
+      computeReciprocityIndex(analysis.matrices.reciprociPos)
+    );
+    document.getElementById("summary-reciproci-neg").textContent = formatPercent(
+      computeReciprocityIndex(analysis.matrices.reciprociNeg)
+    );
 
     const warnings = [];
     if (analysis.warnings.unknownSelections.length) {
@@ -757,6 +786,16 @@
     renderers.get(view)(currentAnalysis, viewContainer);
   }
 
+  function computeReciprocityIndex(matrix) {
+    const rowTotals = sumRows(matrix);
+    const denom = matrix.length - 1;
+    if (denom <= 0) {
+      return 0;
+    }
+    const total = rowTotals.reduce((acc, value) => acc + value / denom, 0);
+    return total / rowTotals.length;
+  }
+
   function createRenderer(view) {
     switch (view) {
       case "matrix-pos":
@@ -773,7 +812,8 @@
               matrix: { palette: PALETTE.posMatrix, scope: "matrix" },
               totals: { palette: PALETTE.posTotals, scope: "totals" }
             },
-            true
+            true,
+            "Totale scelte ricevute"
           ));
         };
       case "responses":
@@ -794,7 +834,8 @@
               matrix: { palette: PALETTE.negMatrix, scope: "matrix" },
               totals: { palette: PALETTE.negTotals, scope: "totals" }
             },
-            true
+            true,
+            "Totale scelte ricevute"
           ));
         };
       case "reciproci-pos":
@@ -809,6 +850,16 @@
               totals: { palette: PALETTE.posTotals, scope: "totals" }
             }
           ));
+          container.appendChild(renderNetworkSection({
+            title: "Rete dei reciproci positivi",
+            note: "Il grafo mostra solo i legami reciproci positivi.",
+            names: analysis.names,
+            matrix: analysis.matrices.reciprociPos,
+            strengthMatrix: analysis.matrices.forzaLegami,
+            nodePalette: PALETTE.network,
+            edgePalette: ["#d5d8dc", "#1a9850"],
+            toggleId: "link-strength-toggle-pos"
+          }));
         };
       case "reciproci-neg":
         return (analysis, container) => {
@@ -822,6 +873,16 @@
               totals: { palette: PALETTE.negTotals, scope: "totals" }
             }
           ));
+          container.appendChild(renderNetworkSection({
+            title: "Rete dei reciproci negativi",
+            note: "Il grafo mostra solo i legami reciproci negativi.",
+            names: analysis.names,
+            matrix: analysis.matrices.reciprociNeg,
+            strengthMatrix: analysis.matrices.forzaAntagonismo,
+            nodePalette: [...PALETTE.network].reverse(),
+            edgePalette: ["#d5d8dc", "#d73027"],
+            toggleId: "link-strength-toggle-neg"
+          }));
         };
       case "forza-legami":
         return (analysis, container) => {
@@ -871,23 +932,20 @@
               matrix: { palette: PALETTE.nonRic, scope: "combined" },
               totals: { palette: PALETTE.nonRic, scope: "combined" }
             },
-            true
+            true,
+            "Positive ricevute non ricambiate"
           ));
         };
       case "riassunto":
         return (analysis, container) => {
           container.appendChild(renderSummarySection(analysis));
         };
-      case "rete":
-        return (analysis, container) => {
-          container.appendChild(renderNetworkSection(analysis));
-        };
       default:
         return () => undefined;
     }
   }
 
-  function renderMatrixSection(title, description, names, matrix, rowTotals, colTotals, totalLabel, colorConfig, includeTotalsRow) {
+  function renderMatrixSection(title, description, names, matrix, rowTotals, colTotals, totalLabel, colorConfig, includeTotalsRow, totalsRowLabel = "Totali") {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
     heading.textContent = title;
@@ -902,18 +960,18 @@
     const thead = document.createElement("thead");
     const headerRow = document.createElement("tr");
 
-      const firstTh = document.createElement("th");
-      firstTh.textContent = "Chi sceglie ↓ / Chi viene scelto →";
+    const firstTh = document.createElement("th");
+    firstTh.textContent = "Chi sceglie ↓ / Chi viene scelto →";
     headerRow.appendChild(firstTh);
 
     names.forEach((name) => {
       const th = document.createElement("th");
-      th.textContent = name;
+      setHeaderText(th, name);
       headerRow.appendChild(th);
     });
 
     const totalTh = document.createElement("th");
-    totalTh.textContent = totalLabel;
+    setHeaderText(totalTh, totalLabel);
     totalTh.classList.add("sticky-right");
     headerRow.appendChild(totalTh);
 
@@ -955,7 +1013,7 @@
       const tfoot = document.createElement("tfoot");
       const tr = document.createElement("tr");
       const label = document.createElement("th");
-      label.textContent = "Totali ricevuti";
+      label.textContent = totalsRowLabel;
       tr.appendChild(label);
 
       colTotals.forEach((value) => {
@@ -1005,17 +1063,17 @@
 
     names.forEach((name) => {
       const th = document.createElement("th");
-      th.textContent = name;
+      setHeaderText(th, name);
       headerRow.appendChild(th);
     });
 
     const totalTh = document.createElement("th");
-    totalTh.textContent = "Totale reciprocità";
+    setHeaderText(totalTh, "Totale reciprocità");
     totalTh.classList.add("sticky-right");
     headerRow.appendChild(totalTh);
 
     const idxTh = document.createElement("th");
-    idxTh.textContent = "Indice reciprocità";
+    setHeaderText(idxTh, "Indice reciprocità");
     headerRow.appendChild(idxTh);
 
     thead.appendChild(headerRow);
@@ -1102,6 +1160,34 @@
     return section;
   }
 
+  function setHeaderText(cell, text) {
+    const value = text == null ? "" : String(text);
+    const words = value.trim().split(/\s+/).filter(Boolean);
+    cell.textContent = "";
+    if (words.length <= 1) {
+      cell.textContent = value;
+      return;
+    }
+    const lines = [];
+    words.forEach((word) => {
+      if (!lines.length) {
+        lines.push(word);
+        return;
+      }
+      if (word.length <= 1) {
+        lines[lines.length - 1] = `${lines[lines.length - 1]} ${word}`;
+        return;
+      }
+      lines.push(word);
+    });
+    lines.forEach((line) => {
+      const span = document.createElement("span");
+      span.textContent = line;
+      span.style.display = "block";
+      cell.appendChild(span);
+    });
+  }
+
   function renderSummarySection(analysis) {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
@@ -1120,25 +1206,25 @@
     const row1 = document.createElement("tr");
     [
       "Atleta",
-      "Scelte ricevute + (Tec)",
-      "Scelte ricevute + (Att)",
-      "Scelte ricevute + (Soc)",
-      "Scelte ricevute + (Tot)",
-      "Scelte ricevute - (Tec)",
-      "Scelte ricevute - (Att)",
-      "Scelte ricevute - (Soc)",
-      "Scelte ricevute - (Tot)",
+      "Scelte ricevute + (Tecniche)",
+      "Scelte ricevute + (Attitudinali)",
+      "Scelte ricevute + (Sociali)",
+      "Scelte ricevute + (Totali)",
+      "Scelte ricevute - (Tecniche)",
+      "Scelte ricevute - (Attitudinali)",
+      "Scelte ricevute - (Sociali)",
+      "Scelte ricevute - (Totali)",
       "Scelte date +",
       "Scelte date -",
       "Reciproci +",
       "Reciproci -",
       "Forza legami",
       "Forza antagonismo",
-      "Positive date non ric.",
-      "Positive ricevute non ric."
+      "Positive date e non ricambiate",
+      "Positive ricevute e non ricambiate"
     ].forEach((label) => {
       const th = document.createElement("th");
-      th.textContent = label;
+      setHeaderText(th, label);
       row1.appendChild(th);
     });
     thead.appendChild(row1);
@@ -1228,7 +1314,7 @@
     const classRow = document.createElement("tr");
     ["Atleta", "Influenza positiva", "Influenza negativa", "Equilibrio relazionale", "Etichetta sintetica"].forEach((label) => {
       const th = document.createElement("th");
-      th.textContent = label;
+      setHeaderText(th, label);
       classRow.appendChild(th);
     });
     classHead.appendChild(classRow);
@@ -1394,16 +1480,16 @@
     return data;
   }
 
-  function renderNetworkSection(analysis) {
+  function renderNetworkSection({ title, note, names, matrix, strengthMatrix, nodePalette, edgePalette, toggleId }) {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
-    heading.textContent = "Rete dei reciproci positivi";
+    heading.textContent = title;
     section.appendChild(heading);
 
-    const note = document.createElement("p");
-    note.className = "note";
-    note.textContent = "Il grafo mostra solo i legami reciproci positivi.";
-    section.appendChild(note);
+    const noteEl = document.createElement("p");
+    noteEl.className = "note";
+    noteEl.textContent = note;
+    section.appendChild(noteEl);
 
     const controls = document.createElement("div");
     controls.className = "note";
@@ -1414,7 +1500,7 @@
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.checked = true;
-    toggle.id = "link-strength-toggle";
+    toggle.id = toggleId;
     const text = document.createElement("span");
     text.textContent = "Colora i legami in base alla forza";
     label.appendChild(toggle);
@@ -1430,48 +1516,35 @@
     canvas.height = 520;
     network.appendChild(canvas);
 
-    const list = document.createElement("div");
-    list.className = "network-list";
-    list.innerHTML = "<h3>Clique trovate</h3>";
-    const cliques = findCliques(analysis.matrices.reciprociPos, analysis.names);
-    if (cliques.length === 0) {
-      const p = document.createElement("p");
-      p.textContent = "Nessuna clique rilevante.";
-      list.appendChild(p);
-    } else {
-      cliques.forEach((clique) => {
-        const p = document.createElement("p");
-        p.textContent = `• ${clique.join(", ")}`;
-        list.appendChild(p);
-      });
-    }
-    network.appendChild(list);
-
     section.appendChild(network);
     initNetwork(
       canvas,
-      analysis.names,
-      analysis.matrices.reciprociPos,
-      analysis.matrices.forzaLegami,
-      toggle
+      names,
+      matrix,
+      strengthMatrix,
+      toggle,
+      {
+        nodePalette,
+        edgePalette
+      }
     );
 
     return section;
   }
 
-  function initNetwork(canvas, names, matrix, strengthMatrix, toggleEl) {
+  function initNetwork(canvas, names, matrix, strengthMatrix, toggleEl, config) {
     const ctx = canvas.getContext("2d");
     const width = canvas.width;
     const height = canvas.height;
 
-    const state = createNetworkState(names, matrix, strengthMatrix, width, height);
+    const state = createNetworkState(names, matrix, strengthMatrix, width, height, config);
     canvas._networkState = state;
     drawNetwork(ctx, state);
     attachNetworkHandlers(canvas);
     attachNetworkToggle(canvas, toggleEl);
   }
 
-  function createNetworkState(names, matrix, strengthMatrix, width, height) {
+  function createNetworkState(names, matrix, strengthMatrix, width, height, config) {
     const nodes = names.map((name) => ({ name, x: 0, y: 0 }));
     const edges = [];
     const strengths = [];
@@ -1500,12 +1573,14 @@
       width,
       height,
       dragIndex: null,
-      showStrength: true
+      showStrength: true,
+      nodePalette: config?.nodePalette || PALETTE.network,
+      edgePalette: config?.edgePalette || ["#d5d8dc", "#1a9850"]
     };
   }
 
   function drawNetwork(ctx, state) {
-    const { nodes, edges, degrees, maxDegree, width, height, strengths, strengthRange, showStrength } = state;
+    const { nodes, edges, degrees, maxDegree, width, height, strengths, strengthRange, showStrength, nodePalette, edgePalette } = state;
     ctx.clearRect(0, 0, width, height);
     ctx.lineWidth = 1.2;
 
@@ -1513,7 +1588,7 @@
       if (showStrength) {
         const value = strengths[idx] || 0;
         const t = strengthRange.min === strengthRange.max ? 0 : (value - strengthRange.min) / (strengthRange.max - strengthRange.min);
-        ctx.strokeStyle = interpolateBi(["#d5d8dc", "#1a9850"], t);
+        ctx.strokeStyle = interpolateBi(edgePalette, t);
       } else {
         ctx.strokeStyle = "rgba(0, 0, 0, 0.2)";
       }
@@ -1527,7 +1602,7 @@
       const degree = degrees[idx];
       const radius = 8 + (degree / maxDegree) * 16;
       const t = degree / maxDegree;
-      const color = interpolateTri(PALETTE.network, t);
+      const color = interpolateTri(nodePalette, t);
 
       ctx.beginPath();
       ctx.fillStyle = color;
@@ -1668,35 +1743,6 @@
     }
   }
 
-  function findCliques(matrix, names) {
-    const n = names.length;
-    const adj = Array.from({ length: n }, (_, i) =>
-      new Set(matrix[i].map((value, idx) => (value > 0 ? idx : null)).filter((v) => v !== null))
-    );
-    const cliques = [];
-
-    function bronKerbosch(r, p, x) {
-      if (p.size === 0 && x.size === 0) {
-        if (r.length >= 3) {
-          cliques.push(r.map((idx) => names[idx]));
-        }
-        return;
-      }
-      const pArray = Array.from(p);
-      for (const v of pArray) {
-        const newR = r.concat(v);
-        const newP = new Set([...p].filter((u) => adj[v].has(u)));
-        const newX = new Set([...x].filter((u) => adj[v].has(u)));
-        bronKerbosch(newR, newP, newX);
-        p.delete(v);
-        x.add(v);
-      }
-    }
-
-    bronKerbosch([], new Set(Array.from({ length: n }, (_, i) => i)), new Set());
-    return cliques;
-  }
-
   function countReciprociPairs(matrix) {
     let count = 0;
     for (let i = 0; i < matrix.length; i += 1) {
@@ -1747,6 +1793,15 @@
     return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
 
+  function base64UrlEncodeBytes(bytes) {
+    let binary = "";
+    bytes.forEach((b) => {
+      binary += String.fromCharCode(b);
+    });
+    const base64 = btoa(binary);
+    return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
   function base64UrlDecode(text) {
     try {
       const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
@@ -1757,6 +1812,377 @@
     } catch (error) {
       setStatus("Link dati non valido.", true);
       return null;
+    }
+  }
+
+  function base64UrlDecodeBytes(text) {
+    try {
+      const base64 = text.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, "=");
+      const binary = atob(padded);
+      return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function packCsvForLink(text) {
+    const { headers, rows } = parseCsv(text);
+    const nameIndex = findNameColumn(headers);
+    const names = [];
+    const nameMap = new Map();
+
+    const addName = (raw) => {
+      const normalized = normalizeName(raw || "");
+      if (!normalized) {
+        return;
+      }
+      if (!nameMap.has(normalized)) {
+        nameMap.set(normalized, names.length);
+        names.push(raw.trim());
+      }
+    };
+
+    rows.forEach((row) => {
+      addName(row[nameIndex] || "");
+    });
+
+    rows.forEach((row) => {
+      headers.forEach((_, idx) => {
+        if (idx === nameIndex) {
+          return;
+        }
+        splitNames(row[idx] || "").forEach(addName);
+      });
+    });
+
+    const bytes = [];
+    bytes.push(1);
+    writeVarint(headers.length, bytes);
+    headers.forEach((header) => writeString(header, bytes));
+    writeVarint(nameIndex, bytes);
+    writeVarint(names.length, bytes);
+    names.forEach((name) => writeString(name, bytes));
+    writeVarint(rows.length, bytes);
+
+    const questionCount = headers.length - 1;
+    rows.forEach((row) => {
+      const chooserKey = normalizeName(row[nameIndex] || "");
+      const chooserIndex = nameMap.has(chooserKey) ? nameMap.get(chooserKey) : names.length;
+      writeVarint(chooserIndex, bytes);
+      let answersWritten = 0;
+      headers.forEach((_, idx) => {
+        if (idx === nameIndex) {
+          return;
+        }
+        const picks = splitNames(row[idx] || "");
+        const indices = picks
+          .map((pick) => nameMap.get(normalizeName(pick)))
+          .filter((value) => Number.isInteger(value));
+        writeVarint(indices.length, bytes);
+        indices.forEach((value) => writeVarint(value, bytes));
+        answersWritten += 1;
+      });
+      if (answersWritten < questionCount) {
+        for (let i = answersWritten; i < questionCount; i += 1) {
+          writeVarint(0, bytes);
+        }
+      }
+    });
+
+    return new Uint8Array(bytes);
+  }
+
+  function decodePackedCsv(payload) {
+    if (!payload) {
+      return null;
+    }
+    if (!payload.startsWith("pack:")) {
+      return payload;
+    }
+    try {
+      return unpackCsvFromLink(payload.slice(5));
+    } catch (error) {
+      setStatus("Link dati non valido.", true);
+      return null;
+    }
+  }
+
+  function unpackCsvFromLink(payload) {
+    const data = JSON.parse(payload);
+    if (!data || data.v !== 1 || !Array.isArray(data.headers)) {
+      throw new Error("Formato link non valido.");
+    }
+    const headers = data.headers;
+    const nameIndex = data.nameIndex;
+    const names = data.names || [];
+    const rows = data.rows || [];
+
+    const lines = [];
+    lines.push(headers.map(escapeCsvCell).join(","));
+    rows.forEach((row) => {
+      const chooserIndex = row[0];
+      const answers = Array.isArray(row[1]) ? row[1] : [];
+      const cells = Array(headers.length).fill("");
+      if (Number.isInteger(chooserIndex) && names[chooserIndex]) {
+        cells[nameIndex] = names[chooserIndex];
+      }
+      let answerIndex = 0;
+      for (let i = 0; i < headers.length; i += 1) {
+        if (i === nameIndex) {
+          continue;
+        }
+        const indices = answers[answerIndex] || [];
+        const picks = indices
+          .map((idx) => names[idx])
+          .filter(Boolean);
+        cells[i] = picks.join(", ");
+        answerIndex += 1;
+      }
+      lines.push(cells.map(escapeCsvCell).join(","));
+    });
+    return lines.join("\n");
+  }
+
+  function escapeCsvCell(value) {
+    const safe = value == null ? "" : String(value);
+    const escaped = safe.replace(/"/g, '""');
+    if (/[",\n\r]/.test(escaped)) {
+      return `"${escaped}"`;
+    }
+    return escaped;
+  }
+
+  function unpackCsvFromBinary(bytes) {
+    if (!bytes || !bytes.length) {
+      return null;
+    }
+    let offset = 0;
+    const version = bytes[offset];
+    offset += 1;
+    if (version !== 1) {
+      throw new Error("Formato link non supportato.");
+    }
+
+    const headerResult = readListOfStrings(bytes, offset);
+    const headers = headerResult.value;
+    offset = headerResult.offset;
+
+    const nameIndexResult = readVarint(bytes, offset);
+    const nameIndex = nameIndexResult.value;
+    offset = nameIndexResult.offset;
+
+    const namesResult = readListOfStrings(bytes, offset);
+    const names = namesResult.value;
+    offset = namesResult.offset;
+
+    const rowCountResult = readVarint(bytes, offset);
+    const rowCount = rowCountResult.value;
+    offset = rowCountResult.offset;
+
+    const questionCount = Math.max(headers.length - 1, 0);
+    const lines = [];
+    lines.push(headers.map(escapeCsvCell).join(","));
+
+    for (let r = 0; r < rowCount; r += 1) {
+      const chooserResult = readVarint(bytes, offset);
+      const chooserIndex = chooserResult.value;
+      offset = chooserResult.offset;
+
+      const answers = [];
+      for (let q = 0; q < questionCount; q += 1) {
+        const countResult = readVarint(bytes, offset);
+        const count = countResult.value;
+        offset = countResult.offset;
+        const indices = [];
+        for (let k = 0; k < count; k += 1) {
+          const idxResult = readVarint(bytes, offset);
+          indices.push(idxResult.value);
+          offset = idxResult.offset;
+        }
+        answers.push(indices);
+      }
+
+      const cells = Array(headers.length).fill("");
+      if (chooserIndex < names.length) {
+        cells[nameIndex] = names[chooserIndex];
+      }
+      let answerIndex = 0;
+      for (let i = 0; i < headers.length; i += 1) {
+        if (i === nameIndex) {
+          continue;
+        }
+        const indices = answers[answerIndex] || [];
+        const picks = indices.map((idx) => names[idx]).filter(Boolean);
+        cells[i] = picks.join(", ");
+        answerIndex += 1;
+      }
+      lines.push(cells.map(escapeCsvCell).join(","));
+    }
+
+    return lines.join("\n");
+  }
+
+  function writeVarint(value, bytes) {
+    let current = Math.max(0, Math.floor(value));
+    while (current >= 128) {
+      bytes.push((current % 128) + 128);
+      current = Math.floor(current / 128);
+    }
+    bytes.push(current);
+  }
+
+  function readVarint(bytes, offset) {
+    let value = 0;
+    let shift = 0;
+    let index = offset;
+    while (index < bytes.length) {
+      const byte = bytes[index];
+      index += 1;
+      value += (byte & 0x7f) * (2 ** shift);
+      if ((byte & 0x80) === 0) {
+        return { value, offset: index };
+      }
+      shift += 7;
+    }
+    throw new Error("Link dati non valido.");
+  }
+
+  function writeString(text, bytes) {
+    const encoded = new TextEncoder().encode(text);
+    writeVarint(encoded.length, bytes);
+    encoded.forEach((byte) => bytes.push(byte));
+  }
+
+  function readString(bytes, offset) {
+    const lengthResult = readVarint(bytes, offset);
+    const length = lengthResult.value;
+    const start = lengthResult.offset;
+    const end = start + length;
+    if (end > bytes.length) {
+      throw new Error("Link dati non valido.");
+    }
+    const chunk = bytes.slice(start, end);
+    return { value: new TextDecoder().decode(chunk), offset: end };
+  }
+
+  function readListOfStrings(bytes, offset) {
+    const countResult = readVarint(bytes, offset);
+    const count = countResult.value;
+    let currentOffset = countResult.offset;
+    const values = [];
+    for (let i = 0; i < count; i += 1) {
+      const item = readString(bytes, currentOffset);
+      values.push(item.value);
+      currentOffset = item.offset;
+    }
+    return { value: values, offset: currentOffset };
+  }
+
+  async function encodeLinkPayload(payload) {
+    if (payload instanceof Uint8Array) {
+      if (typeof CompressionStream === "function") {
+        const compressed = await gzipCompressBytes(payload);
+        return `gzb.${base64UrlEncodeBytes(compressed)}`;
+      }
+      return `bin.${base64UrlEncodeBytes(payload)}`;
+    }
+    if (typeof CompressionStream === "function") {
+      const compressed = await gzipCompress(payload);
+      return `gz.${base64UrlEncodeBytes(compressed)}`;
+    }
+    return `raw.${base64UrlEncode(payload)}`;
+  }
+
+  async function decodeLinkPayload(encoded) {
+    if (encoded.startsWith("gzb.")) {
+      const bytes = base64UrlDecodeBytes(encoded.slice(4));
+      if (!bytes) {
+        setStatus("Link dati non valido.", true);
+        return null;
+      }
+      const decompressed = await gzipDecompressBytes(bytes);
+      if (!decompressed) {
+        return null;
+      }
+      return { kind: "bytes", value: decompressed };
+    }
+    if (encoded.startsWith("bin.")) {
+      const bytes = base64UrlDecodeBytes(encoded.slice(4));
+      if (!bytes) {
+        setStatus("Link dati non valido.", true);
+        return null;
+      }
+      return { kind: "bytes", value: bytes };
+    }
+    if (encoded.startsWith("gz.")) {
+      const bytes = base64UrlDecodeBytes(encoded.slice(3));
+      if (!bytes) {
+        setStatus("Link dati non valido.", true);
+        return null;
+      }
+      const text = await gzipDecompress(bytes);
+      return text ? { kind: "text", value: text } : null;
+    }
+    if (encoded.startsWith("raw.")) {
+      return { kind: "text", value: base64UrlDecode(encoded.slice(4)) };
+    }
+    const bytes = base64UrlDecodeBytes(encoded);
+    if (bytes) {
+      const text = await gzipDecompress(bytes, true);
+      if (text) {
+        return { kind: "text", value: text };
+      }
+    }
+    const fallback = base64UrlDecode(encoded);
+    return fallback ? { kind: "text", value: fallback } : null;
+  }
+
+  async function gzipCompressBytes(bytes) {
+    const stream = new CompressionStream("gzip");
+    const writer = stream.writable.getWriter();
+    writer.write(bytes);
+    writer.close();
+    const buffer = await new Response(stream.readable).arrayBuffer();
+    return new Uint8Array(buffer);
+  }
+
+  async function gzipDecompressBytes(bytes, silentFailure) {
+    if (typeof DecompressionStream !== "function") {
+      if (!silentFailure) {
+        setStatus("Il browser non supporta la decompressione dei link.", true);
+      }
+      return null;
+    }
+    try {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+      const buffer = await new Response(stream).arrayBuffer();
+      return new Uint8Array(buffer);
+    } catch (error) {
+      if (!silentFailure) {
+        setStatus("Link dati non valido.", true);
+      }
+      return null;
+    }
+  }
+
+  async function gzipCompress(text) {
+    const encoder = new TextEncoder();
+    return gzipCompressBytes(encoder.encode(text));
+  }
+
+  async function gzipDecompress(bytes, silentFailure) {
+    const decompressed = await gzipDecompressBytes(bytes, silentFailure);
+    if (!decompressed) {
+      return null;
+    }
+    return new TextDecoder().decode(decompressed);
+  }
+
+  async function initializeFromStorage() {
+    const restored = await restoreFromLink();
+    if (!restored) {
+      restoreCsv();
     }
   }
 

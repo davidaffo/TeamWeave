@@ -108,6 +108,27 @@ body {
   margin-top: 1rem;
 }
 
+.paste-box {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.paste-box label {
+  font-weight: 600;
+}
+
+#paste-input {
+  width: 100%;
+  min-height: 140px;
+  padding: 0.8rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--border);
+  background: #fdfcf8;
+  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+  resize: vertical;
+}
+
 .export-box {
   margin-top: 1.2rem;
   display: grid;
@@ -181,6 +202,16 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+}
+
+.summary-card-pos {
+  background: #e4f5e6;
+  border-color: rgba(45, 106, 79, 0.3);
+}
+
+.summary-card-neg {
+  background: #fde3e3;
+  border-color: rgba(215, 48, 39, 0.3);
 }
 
 .summary-card strong {
