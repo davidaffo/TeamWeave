@@ -24,7 +24,7 @@
       <h2>Caricamento dati</h2>
       <p>Il CSV deve avere le stesse colonne del primo foglio Excel (timestamp, nome, domande in ordine). Le colonne pari sono positive, le dispari negative.</p>
       <div class="upload-row">
-        <input id="file-input" type="file" accept=".csv" />
+        <input id="file-input" type="file" accept=".csv" multiple />
       </div>
       <div class="upload-row">
         <button id="export-link-btn" type="button">Genera codice dati</button>
@@ -42,6 +42,23 @@
         <label for="import-code">Importa da codice</label>
         <textarea id="import-code" rows="4" placeholder="Incolla qui il codice dati..."></textarea>
         <button id="import-code-btn" type="button">Importa codice</button>
+      </div>
+      <div id="dataset-box" class="dataset-box hidden">
+        <div class="dataset-row">
+          <label for="dataset-select">Dataset attivo</label>
+          <select id="dataset-select"></select>
+        </div>
+        <div class="dataset-row">
+          <button id="delete-dataset-btn" type="button">Rimuovi dataset</button>
+        </div>
+        <div id="compare-row" class="dataset-row">
+          <label for="compare-a">Confronto</label>
+          <div class="compare-selects">
+            <select id="compare-a"></select>
+            <select id="compare-b"></select>
+          </div>
+        </div>
+        <p id="compare-note" class="note">Delta mostrata come B - A.</p>
       </div>
       <div id="status" class="status" role="status"></div>
     </section>
@@ -72,6 +89,7 @@
         <button class="tab" data-view="forza-antagonismo">Forza antagonismo</button>
         <button class="tab" data-view="non-ricambiate">Positive non ricambiate</button>
         <button class="tab" data-view="riassunto">Dati riassuntivi</button>
+        <button class="tab" data-view="confronto">Confronto</button>
       </nav>
 
     <section id="view-container" class="view-container"></section>

@@ -153,6 +153,35 @@ body {
   resize: vertical;
 }
 
+.dataset-box {
+  margin-top: 1.2rem;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.dataset-row {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.dataset-row label {
+  font-weight: 600;
+}
+
+.dataset-row select {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: #fdfcf8;
+  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+}
+
+.compare-selects {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+
 input[type="file"] {
   flex: 1 1 250px;
   padding: 0.6rem;
@@ -245,6 +274,24 @@ button:hover {
   box-shadow: var(--shadow);
 }
 
+.view-container.dual-view {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.view-panel {
+  background: var(--card);
+  border-radius: 1.2rem;
+  padding: 1.4rem;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
 .table-wrap {
   overflow: auto;
   max-height: 70vh;
@@ -266,6 +313,29 @@ button:hover {
   text-align: center;
   min-width: 2.4rem;
   background: #fffefb;
+}
+
+.diff-arrow {
+  margin-left: 0.35rem;
+  font-weight: 800;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.diff-up {
+  color: #1a9850;
+}
+
+.diff-down {
+  color: #d73027;
+}
+
+.matrix-table td.delta-good {
+  background-color: rgba(129, 212, 26, 0.35) !important;
+}
+
+.matrix-table td.delta-bad {
+  background-color: rgba(215, 48, 39, 0.35) !important;
 }
 
 .matrix-table thead th {
@@ -415,13 +485,14 @@ button:hover {
 
 .network {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(280px, 360px);
+  grid-template-columns: 1fr;
   gap: 1.6rem;
 }
 
 .network canvas {
   width: 100%;
   height: 520px;
+  display: block;
   border-radius: 1rem;
   border: 1px solid var(--border);
   background: #fffefb;

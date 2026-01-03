@@ -2,6 +2,13 @@
   const fileInput = document.getElementById("file-input");
   const importCodeInput = document.getElementById("import-code");
   const importCodeBtn = document.getElementById("import-code-btn");
+  const datasetBox = document.getElementById("dataset-box");
+  const datasetSelect = document.getElementById("dataset-select");
+  const deleteDatasetBtn = document.getElementById("delete-dataset-btn");
+  const compareRow = document.getElementById("compare-row");
+  const compareNote = document.getElementById("compare-note");
+  const compareSelectA = document.getElementById("compare-a");
+  const compareSelectB = document.getElementById("compare-b");
   const statusEl = document.getElementById("status");
   const summaryEl = document.getElementById("summary");
   const viewsEl = document.getElementById("views");
@@ -55,8 +62,13 @@
   );
 
   const renderers = new Map();
+  const datasets = [];
   let currentAnalysis = null;
-  const STORAGE_KEY = "teamweave:lastCsv";
+  let currentDatasetId = null;
+  let datasetCounter = 1;
+  let isRestoringDatasets = false;
+  const DATASETS_KEY = "teamweave:datasets";
+  const DATASET_STATE_KEY = "teamweave:datasetState";
   const VIEW_KEY = "teamweave:lastView";
   const LINK_PARAM = "data";
   const PALETTE = {
@@ -92,11 +104,38 @@
   }
 
   fileInput.addEventListener("change", (event) => {
-    const file = event.target.files[0];
-    if (!file) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) {
       return;
     }
-    readFile(file);
+    readFiles(files);
+    event.target.value = "";
+  });
+
+  datasetSelect.addEventListener("change", () => {
+    setCurrentDataset(datasetSelect.value);
+  });
+
+  deleteDatasetBtn.addEventListener("click", () => {
+    const dataset = getCurrentDataset();
+    if (!dataset) {
+      return;
+    }
+    removeDataset(dataset.id);
+  });
+
+  compareSelectA.addEventListener("change", () => {
+    ensureCompareSelection();
+    const active = getActiveView() || "responses";
+    renderView(active);
+    saveDatasetState();
+  });
+
+  compareSelectB.addEventListener("change", () => {
+    ensureCompareSelection();
+    const active = getActiveView() || "responses";
+    renderView(active);
+    saveDatasetState();
   });
 
   importCodeBtn.addEventListener("click", async () => {
@@ -116,24 +155,21 @@
       setStatus("Codice non valido.", true);
       return;
     }
-    loadCsv(csv);
+    loadCsv(csv, { name: `Codice ${datasetCounter}`, persist: true });
+    datasetCounter += 1;
   });
 
   exportLinkBtn.addEventListener("click", async () => {
-    if (!currentAnalysis) {
-      setStatus("Carica un CSV prima di creare il link.", true);
+    const dataset = getCurrentDataset();
+    if (!dataset) {
+      setStatus("Carica un CSV prima di creare il codice.", true);
       return;
     }
-    const csv = localStorage.getItem(STORAGE_KEY);
-    if (!csv) {
-      setStatus("Nessun CSV salvato in memoria.", true);
-      return;
-    }
-    let payload = csv;
+    let payload = dataset.csv;
     try {
-      payload = packCsvForLink(csv);
+      payload = packCsvForLink(dataset.csv);
     } catch (error) {
-      payload = csv;
+      payload = dataset.csv;
     }
     const encoded = await encodeLinkPayload(payload);
     exportLinkInput.value = encoded;
@@ -147,19 +183,19 @@
     }
     try {
       await navigator.clipboard.writeText(value);
-      setStatus("Link copiato negli appunti.", false);
+      setStatus("Codice copiato negli appunti.", false);
     } catch (error) {
-      setStatus("Impossibile copiare il link.", true);
+      setStatus("Impossibile copiare il codice.", true);
     }
   });
 
   exportCsvBtn.addEventListener("click", () => {
-    const csv = localStorage.getItem(STORAGE_KEY);
-    if (!csv) {
+    const dataset = getCurrentDataset();
+    if (!dataset) {
       setStatus("Nessun CSV salvato in memoria.", true);
       return;
     }
-    downloadCsv(csv);
+    downloadCsv(dataset.csv);
   });
 
 
@@ -179,36 +215,51 @@
   initializeFromStorage();
 
   function readFile(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      loadCsv(reader.result);
-    };
-    reader.onerror = () => {
-      setStatus("Impossibile leggere il file.", true);
-    };
-    reader.readAsText(file);
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Impossibile leggere il file."));
+      reader.readAsText(file);
+    });
   }
 
-  function loadCsv(text) {
+  async function readFiles(files) {
+    for (const file of files) {
+      try {
+        const content = await readFile(file);
+        loadCsv(content, { name: file.name, persist: true });
+      } catch (error) {
+        setStatus("Impossibile leggere il file.", true);
+      }
+    }
+  }
+
+  function loadCsv(text, options = {}) {
+    const { name = `Dataset ${datasets.length + 1}`, persist = true, replaceAll = false } = options;
     try {
-      const sanitized = text.replace(/^\uFEFF/, "");
-      const { headers, rows } = parseCsv(sanitized);
-      const analysis = analyzeData(headers, rows);
-      currentAnalysis = analysis;
-      saveCsv(sanitized);
-      updateSummary(analysis);
-      summaryEl.classList.remove("hidden");
-      viewsEl.classList.remove("hidden");
-      const restored = restoreView();
-      const selectedView = restored || "responses";
-      renderView(selectedView);
-      tabs.forEach((btn) => btn.classList.remove("active"));
-      const activeTab = tabs.find((btn) => btn.dataset.view === selectedView) || tabs[0];
-      activeTab.classList.add("active");
-      setStatus(`Caricato: ${analysis.rows.length} risposte, ${analysis.names.length} atlete.`, false);
+      const dataset = createDatasetFromCsv(text, name);
+      if (replaceAll) {
+        datasets.length = 0;
+      }
+      datasets.push(dataset);
+      datasetCounter = Math.max(datasetCounter, datasets.length + 1);
+      saveDatasets();
+      setCurrentDataset(dataset.id, { persist });
     } catch (error) {
       setStatus(error.message, true);
     }
+  }
+
+  function createDatasetFromCsv(text, name) {
+    const sanitized = text.replace(/^\uFEFF/, "");
+    const { headers, rows } = parseCsv(sanitized);
+    const analysis = analyzeData(headers, rows);
+    return {
+      id: `ds-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      name,
+      csv: sanitized,
+      analysis
+    };
   }
 
   function setStatus(message, isError) {
@@ -237,25 +288,88 @@
     }
   }
 
-  function saveCsv(text) {
+  function saveDatasets() {
     try {
-      localStorage.setItem(STORAGE_KEY, text);
+      const payload = datasets.map((dataset) => ({
+        id: dataset.id,
+        name: dataset.name,
+        csv: dataset.csv
+      }));
+      localStorage.setItem(DATASETS_KEY, JSON.stringify(payload));
     } catch (error) {
-      setStatus("Memoria del browser piena: impossibile salvare i dati.", true);
+      setStatus("Memoria del browser piena: impossibile salvare i dataset.", true);
     }
   }
 
-  function restoreCsv() {
+  function saveDatasetState() {
     try {
-      const cached = localStorage.getItem(STORAGE_KEY);
-      if (cached) {
-        loadCsv(cached);
-        return true;
-      }
+      const state = {
+        currentDatasetId,
+        compareA: compareSelectA?.value || null,
+        compareB: compareSelectB?.value || null
+      };
+      localStorage.setItem(DATASET_STATE_KEY, JSON.stringify(state));
     } catch (error) {
+      return;
+    }
+  }
+
+  function restoreDatasets() {
+    try {
+      const cached = localStorage.getItem(DATASETS_KEY);
+      if (!cached) {
+        return false;
+      }
+      const entries = JSON.parse(cached);
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return false;
+      }
+      datasets.length = 0;
+      entries.forEach((entry) => {
+        if (!entry || !entry.csv) {
+          return;
+        }
+        try {
+          const dataset = createDatasetFromCsv(entry.csv, entry.name || `Dataset ${datasets.length + 1}`);
+          dataset.id = entry.id || dataset.id;
+          datasets.push(dataset);
+        } catch (error) {
+          return;
+        }
+      });
+      if (!datasets.length) {
+        return false;
+      }
+      isRestoringDatasets = true;
+      datasetCounter = Math.max(datasetCounter, datasets.length + 1);
+      updateDatasetControls();
+      const stateRaw = localStorage.getItem(DATASET_STATE_KEY);
+      let nextId = datasets[0].id;
+      if (stateRaw) {
+        try {
+          const state = JSON.parse(stateRaw);
+          if (state?.currentDatasetId && datasets.some((d) => d.id === state.currentDatasetId)) {
+            nextId = state.currentDatasetId;
+          }
+          if (state?.compareA) {
+            compareSelectA.value = state.compareA;
+          }
+          if (state?.compareB) {
+            compareSelectB.value = state.compareB;
+          }
+          ensureCompareSelection();
+        } catch (error) {
+          return false;
+        }
+      }
+      setCurrentDataset(nextId, { persist: false });
+      isRestoringDatasets = false;
+      saveDatasetState();
+      return true;
+    } catch (error) {
+      isRestoringDatasets = false;
       return false;
     }
-    return false;
   }
 
   async function restoreFromLink() {
@@ -272,7 +386,7 @@
       csv = decodePackedCsv(decoded.value);
     }
     if (csv) {
-      loadCsv(csv);
+      loadCsv(csv, { name: "Link dati", persist: true, replaceAll: true });
       return true;
     }
     return false;
@@ -801,12 +915,131 @@
     }
   }
 
+  function getCurrentDataset() {
+    return datasets.find((dataset) => dataset.id === currentDatasetId) || null;
+  }
+
+  function removeDataset(id) {
+    const index = datasets.findIndex((dataset) => dataset.id === id);
+    if (index === -1) {
+      return;
+    }
+    datasets.splice(index, 1);
+    saveDatasets();
+    if (!datasets.length) {
+      currentDatasetId = null;
+      currentAnalysis = null;
+      summaryEl.classList.add("hidden");
+      viewsEl.classList.add("hidden");
+      viewContainer.innerHTML = "";
+      datasetBox.classList.add("hidden");
+      saveDatasetState();
+      setStatus("Dataset rimosso.", false);
+      return;
+    }
+    const nextId = datasets[0].id;
+    setCurrentDataset(nextId, { persist: false });
+    setStatus("Dataset rimosso.", false);
+  }
+
+  function setCurrentDataset(id, options = {}) {
+    const { persist = true } = options;
+    const dataset = datasets.find((entry) => entry.id === id);
+    if (!dataset) {
+      return;
+    }
+    currentDatasetId = dataset.id;
+    currentAnalysis = dataset.analysis;
+    updateDatasetControls();
+    if (!isRestoringDatasets) {
+      saveDatasetState();
+    }
+    updateSummary(dataset.analysis);
+    summaryEl.classList.remove("hidden");
+    viewsEl.classList.remove("hidden");
+    const selectedView = getActiveView() || restoreView() || "responses";
+    renderView(selectedView);
+    tabs.forEach((btn) => btn.classList.remove("active"));
+    const activeTab = tabs.find((btn) => btn.dataset.view === selectedView) || tabs[0];
+    activeTab.classList.add("active");
+    setStatus(
+      `Caricato: ${dataset.analysis.rows.length} risposte, ${dataset.analysis.names.length} atlete. (${dataset.name})`,
+      false
+    );
+  }
+
+  function updateDatasetControls() {
+    if (!datasets.length) {
+      datasetBox.classList.add("hidden");
+      return;
+    }
+    datasetBox.classList.remove("hidden");
+    populateDatasetSelect(datasetSelect, currentDatasetId);
+    populateDatasetSelect(compareSelectA, compareSelectA.value);
+    populateDatasetSelect(compareSelectB, compareSelectB.value);
+    ensureCompareSelection();
+    const showCompare = datasets.length >= 2;
+    compareRow.classList.toggle("hidden", !showCompare);
+    compareNote.classList.toggle("hidden", !showCompare);
+    compareSelectA.disabled = !showCompare;
+    compareSelectB.disabled = !showCompare;
+    if (!isRestoringDatasets) {
+      saveDatasetState();
+    }
+  }
+
+  function populateDatasetSelect(select, selectedId) {
+    select.textContent = "";
+    datasets.forEach((dataset) => {
+      const option = document.createElement("option");
+      option.value = dataset.id;
+      option.textContent = dataset.name;
+      select.appendChild(option);
+    });
+    const targetId = datasets.some((dataset) => dataset.id === selectedId)
+      ? selectedId
+      : datasets[0]?.id;
+    if (targetId) {
+      select.value = targetId;
+    }
+  }
+
+  function ensureCompareSelection() {
+    if (datasets.length < 2) {
+      return;
+    }
+    if (compareSelectA.value === compareSelectB.value) {
+      const alternative = datasets.find((dataset) => dataset.id !== compareSelectA.value);
+      if (alternative) {
+        compareSelectB.value = alternative.id;
+      }
+    }
+  }
+
+  function getActiveView() {
+    const active = tabs.find((tab) => tab.classList.contains("active"));
+    return active ? active.dataset.view : null;
+  }
+
   function renderView(view) {
     viewContainer.innerHTML = "";
-    if (!currentAnalysis) {
+    const compareDatasets = getCompareDatasets();
+    if (!currentAnalysis && !compareDatasets) {
       return;
     }
 
+    if (view === "confronto") {
+      viewContainer.classList.remove("dual-view");
+      viewContainer.appendChild(renderCompareSection());
+      return;
+    }
+
+    if (compareDatasets) {
+      renderDualView(view, compareDatasets);
+      return;
+    }
+
+    viewContainer.classList.remove("dual-view");
     if (!renderers.has(view)) {
       renderers.set(view, createRenderer(view));
     }
@@ -967,9 +1200,122 @@
         return (analysis, container) => {
           container.appendChild(renderSummarySection(analysis));
         };
+      case "confronto":
+        return (_, container) => {
+          container.appendChild(renderCompareSection());
+        };
       default:
         return () => undefined;
     }
+  }
+
+  function getCompareDatasets() {
+    if (datasets.length < 2) {
+      return null;
+    }
+    const datasetA = datasets.find((dataset) => dataset.id === compareSelectA.value);
+    const datasetB = datasets.find((dataset) => dataset.id === compareSelectB.value);
+    if (!datasetA || !datasetB || datasetA.id === datasetB.id) {
+      return null;
+    }
+    return { datasetA, datasetB };
+  }
+
+  function renderDualView(view, { datasetA, datasetB }) {
+    viewContainer.classList.add("dual-view");
+    if (!renderers.has(view)) {
+      renderers.set(view, createRenderer(view));
+    }
+    const renderer = renderers.get(view);
+    const panels = [];
+    [datasetA, datasetB].forEach((dataset) => {
+      const panel = document.createElement("div");
+      panel.className = "view-panel";
+      const label = document.createElement("p");
+      label.className = "note";
+      label.textContent = dataset.name;
+      panel.appendChild(label);
+      renderer(dataset.analysis, panel);
+      viewContainer.appendChild(panel);
+      panels.push(panel);
+    });
+    if (panels.length === 2) {
+      highlightDifferences(panels[0], panels[1]);
+    }
+  }
+
+  function highlightDifferences(panelA, panelB) {
+    const tablesA = Array.from(panelA.querySelectorAll("table"));
+    const tablesB = Array.from(panelB.querySelectorAll("table"));
+    const count = Math.min(tablesA.length, tablesB.length);
+    for (let i = 0; i < count; i += 1) {
+      compareTables(tablesA[i], tablesB[i]);
+    }
+  }
+
+  function compareTables(tableA, tableB) {
+    const rowsA = getTableDataRows(tableA);
+    const rowsB = getTableDataRows(tableB);
+    const rowCount = Math.min(rowsA.length, rowsB.length);
+    for (let r = 0; r < rowCount; r += 1) {
+      const cellsA = rowsA[r];
+      const cellsB = rowsB[r];
+      const cellCount = Math.min(cellsA.length, cellsB.length);
+      for (let c = 0; c < cellCount; c += 1) {
+        const cellA = cellsA[c];
+        const cellB = cellsB[c];
+        const valueA = parseCellValue(cellA);
+        const valueB = parseCellValue(cellB);
+        if (valueA !== null && valueB !== null) {
+          if (valueA !== valueB) {
+            markDiffCell(cellA, 0);
+            markDiffCell(cellB, valueB - valueA);
+          }
+        } else if (cellA.textContent.trim() !== cellB.textContent.trim()) {
+          markDiffCell(cellA, 0);
+          markDiffCell(cellB, 0);
+        }
+      }
+    }
+  }
+
+  function getTableDataRows(table) {
+    const rows = Array.from(table.querySelectorAll("tbody tr, tfoot tr"));
+    return rows.map((row) => Array.from(row.querySelectorAll("td")));
+  }
+
+  function parseCellValue(cell) {
+    if (!cell) {
+      return null;
+    }
+    if (cell.dataset && cell.dataset.rank) {
+      const rank = Number(cell.dataset.rank);
+      return Number.isFinite(rank) ? rank : null;
+    }
+    const text = cell.textContent;
+    if (!text) {
+      return null;
+    }
+    const cleaned = text.trim().replace(",", ".");
+    if (cleaned === "—") {
+      return null;
+    }
+    if (cleaned.endsWith("%")) {
+      const num = Number.parseFloat(cleaned.slice(0, -1));
+      return Number.isFinite(num) ? num / 100 : null;
+    }
+    const value = Number.parseFloat(cleaned.replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function markDiffCell(cell, delta) {
+    if (!Number.isFinite(delta) || delta === 0) {
+      return;
+    }
+    const arrow = document.createElement("span");
+    arrow.className = delta > 0 ? "diff-arrow diff-up" : "diff-arrow diff-down";
+    arrow.textContent = delta > 0 ? "▲" : "▼";
+    cell.appendChild(arrow);
   }
 
   function renderMatrixSection(title, description, names, matrix, rowTotals, colTotals, totalLabel, colorConfig, includeTotalsRow, totalsRowLabel = "Totali") {
@@ -1348,6 +1694,8 @@
     classTable.appendChild(classHead);
 
     const classBody = document.createElement("tbody");
+    const influenceRank = { Bassa: 1, Media: 2, Alta: 3 };
+    const equilibrioRank = { Ignorata: 1, Bilanciata: 2, Selettiva: 3 };
     analysis.classifications.forEach((row) => {
       const tr = document.createElement("tr");
       [row.name, row.inflPos, row.inflNeg, row.equilibrio, row.label].forEach((value, idx) => {
@@ -1355,10 +1703,19 @@
         cell.textContent = value;
         if (idx === 1) {
           applyLabelFill(cell, value, "positive");
+          if (influenceRank[value]) {
+            cell.dataset.rank = influenceRank[value];
+          }
         } else if (idx === 2) {
           applyLabelFill(cell, value, "negative");
+          if (influenceRank[value]) {
+            cell.dataset.rank = influenceRank[value];
+          }
         } else if (idx === 3) {
           applyEquilibrioFill(cell, value);
+          if (equilibrioRank[value]) {
+            cell.dataset.rank = equilibrioRank[value];
+          }
         } else if (idx === 4) {
           applyEtichettaFill(cell, value);
         }
@@ -1374,6 +1731,221 @@
     section.appendChild(classWrap);
 
     return section;
+  }
+
+  function renderCompareSection() {
+    const section = document.createElement("div");
+    const heading = document.createElement("h2");
+    heading.textContent = "Confronto test";
+    section.appendChild(heading);
+
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "Le differenze sono calcolate come B - A.";
+    section.appendChild(note);
+
+    if (datasets.length < 2) {
+      const empty = document.createElement("p");
+      empty.textContent = "Carica almeno due dataset per vedere il confronto.";
+      section.appendChild(empty);
+      return section;
+    }
+
+    const datasetA = datasets.find((dataset) => dataset.id === compareSelectA.value);
+    const datasetB = datasets.find((dataset) => dataset.id === compareSelectB.value);
+    if (!datasetA || !datasetB) {
+      const empty = document.createElement("p");
+      empty.textContent = "Seleziona due dataset validi.";
+      section.appendChild(empty);
+      return section;
+    }
+
+    const title = document.createElement("p");
+    title.className = "note";
+    title.textContent = `A: ${datasetA.name} | B: ${datasetB.name}`;
+    section.appendChild(title);
+
+    const summaryTable = document.createElement("table");
+    summaryTable.className = "matrix-table";
+    const summaryHead = document.createElement("thead");
+    const summaryRow = document.createElement("tr");
+    ["Metrica", "A", "B", "Delta"].forEach((label) => {
+      const th = document.createElement("th");
+      setHeaderText(th, label);
+      summaryRow.appendChild(th);
+    });
+    summaryHead.appendChild(summaryRow);
+    summaryTable.appendChild(summaryHead);
+
+    const summaryBody = document.createElement("tbody");
+    const summaryMetrics = [
+      {
+        label: "Risposte",
+        get: (analysis) => analysis.rows.length,
+        polarity: "neutral"
+      },
+      {
+        label: "Atlete",
+        get: (analysis) => analysis.names.length,
+        polarity: "neutral"
+      },
+      {
+        label: "Indice reciprocita +",
+        get: (analysis) => computeReciprocityIndex(analysis.matrices.reciprociPos),
+        polarity: "higher"
+      },
+      {
+        label: "Indice reciprocita -",
+        get: (analysis) => computeReciprocityIndex(analysis.matrices.reciprociNeg),
+        polarity: "lower"
+      }
+    ];
+
+    summaryMetrics.forEach((metric) => {
+      const tr = document.createElement("tr");
+      const label = document.createElement("th");
+      label.textContent = metric.label;
+      tr.appendChild(label);
+      const aValue = metric.get(datasetA.analysis);
+      const bValue = metric.get(datasetB.analysis);
+      const delta = Number(bValue) - Number(aValue);
+      const cells = [formatCompareValue(aValue), formatCompareValue(bValue), formatCompareDelta(delta, metric.label)];
+      cells.forEach((value, idx) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        if (idx === 2) {
+          applyDeltaClass(td, delta, metric.polarity);
+        }
+        tr.appendChild(td);
+      });
+      summaryBody.appendChild(tr);
+    });
+    summaryTable.appendChild(summaryBody);
+
+    const summaryWrap = document.createElement("div");
+    summaryWrap.className = "table-wrap";
+    summaryWrap.appendChild(summaryTable);
+    section.appendChild(summaryWrap);
+
+    const detailHeading = document.createElement("h3");
+    detailHeading.textContent = "Differenze per atleta";
+    detailHeading.style.marginTop = "2rem";
+    section.appendChild(detailHeading);
+
+    const compareTable = document.createElement("table");
+    compareTable.className = "matrix-table";
+    const head = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    [
+      "Atleta",
+      "Delta scelte ricevute + (Totali)",
+      "Delta scelte ricevute - (Totali)",
+      "Delta reciproci +",
+      "Delta reciproci -",
+      "Delta positive ricevute non ricambiate",
+      "Delta positive date non ricambiate"
+    ].forEach((label) => {
+      const th = document.createElement("th");
+      setHeaderText(th, label);
+      headerRow.appendChild(th);
+    });
+    head.appendChild(headerRow);
+    compareTable.appendChild(head);
+
+    const body = document.createElement("tbody");
+    const mapA = buildSummaryMap(datasetA.analysis.summaryRows);
+    const mapB = buildSummaryMap(datasetB.analysis.summaryRows);
+    const allNames = Array.from(
+      new Set([...datasetA.analysis.names, ...datasetB.analysis.names].map((name) => normalizeName(name)))
+    );
+    const nameLookup = new Map();
+    datasetA.analysis.names.forEach((name) => nameLookup.set(normalizeName(name), name));
+    datasetB.analysis.names.forEach((name) => {
+      if (!nameLookup.has(normalizeName(name))) {
+        nameLookup.set(normalizeName(name), name);
+      }
+    });
+    allNames.forEach((key) => {
+      const rowA = mapA.get(key);
+      const rowB = mapB.get(key);
+      const tr = document.createElement("tr");
+      const nameCell = document.createElement("th");
+      nameCell.textContent = nameLookup.get(key) || key;
+      tr.appendChild(nameCell);
+      const metrics = [
+        { value: diffValue(rowA?.positiveReceived?.Totali, rowB?.positiveReceived?.Totali), polarity: "higher" },
+        { value: diffValue(rowA?.negativeReceived?.Totali, rowB?.negativeReceived?.Totali), polarity: "lower" },
+        { value: diffValue(rowA?.reciprociPos, rowB?.reciprociPos), polarity: "higher" },
+        { value: diffValue(rowA?.reciprociNeg, rowB?.reciprociNeg), polarity: "lower" },
+        { value: diffValue(rowA?.nonRicambiateRicevute, rowB?.nonRicambiateRicevute), polarity: "lower" },
+        { value: diffValue(rowA?.nonRicambiateDate, rowB?.nonRicambiateDate), polarity: "lower" }
+      ];
+      metrics.forEach((metric) => {
+        const td = document.createElement("td");
+        td.textContent = formatCompareDelta(metric.value);
+        applyDeltaClass(td, metric.value, metric.polarity);
+        tr.appendChild(td);
+      });
+      body.appendChild(tr);
+    });
+    compareTable.appendChild(body);
+
+    const compareWrap = document.createElement("div");
+    compareWrap.className = "table-wrap";
+    compareWrap.appendChild(compareTable);
+    section.appendChild(compareWrap);
+
+    return section;
+  }
+
+  function buildSummaryMap(rows) {
+    const map = new Map();
+    rows.forEach((row) => {
+      map.set(normalizeName(row.name), row);
+    });
+    return map;
+  }
+
+  function diffValue(valueA, valueB) {
+    if (!Number.isFinite(valueA) || !Number.isFinite(valueB)) {
+      return null;
+    }
+    return valueB - valueA;
+  }
+
+  function formatCompareValue(value) {
+    if (!Number.isFinite(value)) {
+      return "—";
+    }
+    if (value % 1 !== 0 && value <= 1) {
+      return formatPercent(value);
+    }
+    return formatNumber(value);
+  }
+
+  function formatCompareDelta(value, label) {
+    if (!Number.isFinite(value)) {
+      return "—";
+    }
+    const sign = value > 0 ? "+" : "";
+    if (label && label.includes("Indice")) {
+      return `${sign}${formatPercent(value)}`;
+    }
+    return `${sign}${formatNumber(value)}`;
+  }
+
+  function applyDeltaClass(cell, value, polarity) {
+    if (!Number.isFinite(value) || value === 0 || polarity === "neutral") {
+      return;
+    }
+    const isPositive = value > 0;
+    if (polarity === "higher") {
+      cell.classList.add(isPositive ? "delta-good" : "delta-bad");
+      return;
+    }
+    if (polarity === "lower") {
+      cell.classList.add(isPositive ? "delta-bad" : "delta-good");
+    }
   }
 
   function renderResponsesSection(analysis) {
@@ -2208,8 +2780,11 @@
 
   async function initializeFromStorage() {
     const restored = await restoreFromLink();
-    if (!restored) {
-      restoreCsv();
+    if (restored) {
+      return;
+    }
+    if (restoreDatasets()) {
+      return;
     }
   }
 
