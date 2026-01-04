@@ -1043,7 +1043,7 @@
     if (!renderers.has(view)) {
       renderers.set(view, createRenderer(view));
     }
-    renderers.get(view)(currentAnalysis, viewContainer);
+      renderers.get(view)(currentAnalysis, viewContainer);
   }
 
   function computeReciprocityIndex(matrix) {
@@ -1075,6 +1075,7 @@
             true,
             "Totale scelte ricevute"
           ));
+          appendNetworkForView(analysis, container, view);
         };
       case "responses":
         return (analysis, container) => {
@@ -1097,6 +1098,7 @@
             true,
             "Totale scelte ricevute"
           ));
+          appendNetworkForView(analysis, container, view);
         };
       case "reciproci-pos":
         return (analysis, container) => {
@@ -1207,6 +1209,115 @@
       default:
         return () => undefined;
     }
+  }
+
+  function appendNetworkForView(analysis, container, view) {
+    const config = getNetworkConfigForView(view, analysis);
+    if (!config) {
+      return;
+    }
+    container.appendChild(renderNetworkSection(config));
+  }
+
+  function getNetworkConfigForView(view, analysis) {
+    const mapping = {
+      "matrix-pos": {
+        title: "Grafo scelte positive",
+        note: "Il grafo mostra le scelte positive ricevute.",
+        matrix: transposeMatrix(analysis.matrices.posMatrix),
+        strengthMatrix: transposeMatrix(analysis.matrices.posMatrix),
+        nodePalette: PALETTE.network,
+        edgePalette: ["#d5d8dc", "#1a9850"]
+      },
+      "matrix-neg": {
+        title: "Grafo scelte negative",
+        note: "Il grafo mostra le scelte negative ricevute.",
+        matrix: transposeMatrix(analysis.matrices.negMatrix),
+        strengthMatrix: transposeMatrix(analysis.matrices.negMatrix),
+        nodePalette: [...PALETTE.network].reverse(),
+        edgePalette: ["#d5d8dc", "#d73027"]
+      },
+      "reciproci-pos": {
+        title: "Rete dei reciproci positivi",
+        note: "Il grafo mostra solo i legami reciproci positivi.",
+        matrix: analysis.matrices.reciprociPos,
+        strengthMatrix: analysis.matrices.forzaLegami,
+        nodePalette: PALETTE.network,
+        edgePalette: ["#d5d8dc", "#1a9850"]
+      },
+      "reciproci-neg": {
+        title: "Rete dei reciproci negativi",
+        note: "Il grafo mostra solo i legami reciproci negativi.",
+        matrix: analysis.matrices.reciprociNeg,
+        strengthMatrix: analysis.matrices.forzaAntagonismo,
+        nodePalette: [...PALETTE.network].reverse(),
+        edgePalette: ["#d5d8dc", "#d73027"]
+      },
+      "forza-legami": {
+        title: "Grafo forza legami",
+        note: "Il grafo usa la forza dei legami positivi.",
+        matrix: analysis.matrices.forzaLegami,
+        strengthMatrix: analysis.matrices.forzaLegami,
+        nodePalette: PALETTE.network,
+        edgePalette: ["#d5d8dc", "#1a9850"]
+      },
+      "forza-antagonismo": {
+        title: "Grafo forza antagonismo",
+        note: "Il grafo usa la forza delle relazioni negative.",
+        matrix: analysis.matrices.forzaAntagonismo,
+        strengthMatrix: analysis.matrices.forzaAntagonismo,
+        nodePalette: [...PALETTE.network].reverse(),
+        edgePalette: ["#d5d8dc", "#d73027"]
+      },
+      "non-ricambiate": {
+        title: "Grafo positive non ricambiate",
+        note: "Il grafo mostra le scelte positive non ricambiate.",
+        matrix: analysis.matrices.nonRicambiatePos,
+        strengthMatrix: analysis.matrices.nonRicambiatePos,
+        nodePalette: PALETTE.network,
+        edgePalette: ["#d5d8dc", "#1a9850"]
+      },
+      "responses": {
+        title: "Grafo scelte positive",
+        note: "Il grafo mostra le scelte positive tra atlete.",
+        matrix: analysis.matrices.posMatrix,
+        strengthMatrix: analysis.matrices.posMatrix,
+        nodePalette: PALETTE.network,
+        edgePalette: ["#d5d8dc", "#1a9850"]
+      },
+      "riassunto": {
+        title: "Grafo scelte positive",
+        note: "Il grafo mostra le scelte positive tra atlete.",
+        matrix: analysis.matrices.posMatrix,
+        strengthMatrix: analysis.matrices.posMatrix,
+        nodePalette: PALETTE.network,
+        edgePalette: ["#d5d8dc", "#1a9850"]
+      }
+    };
+
+    const config = mapping[view];
+    if (!config) {
+      return null;
+    }
+    return {
+      ...config,
+      names: analysis.names,
+      toggleId: `link-strength-toggle-${view}-${Math.random().toString(16).slice(2, 8)}`
+    };
+  }
+
+  function transposeMatrix(matrix) {
+    const size = matrix.length;
+    if (!size) {
+      return [];
+    }
+    const result = createMatrix(size, 0);
+    for (let i = 0; i < size; i += 1) {
+      for (let j = 0; j < size; j += 1) {
+        result[j][i] = matrix[i][j];
+      }
+    }
+    return result;
   }
 
   function getCompareDatasets() {
@@ -2107,6 +2218,19 @@
     controls.appendChild(label);
     section.appendChild(controls);
 
+    const legendStats = getNetworkLegendStats(names, matrix, strengthMatrix);
+    const legend = document.createElement("div");
+    legend.className = "network-legend";
+    const nodeLegend = document.createElement("div");
+    nodeLegend.className = "legend-row";
+    nodeLegend.innerHTML = `<span>Nodi</span><div class="legend-bar" style="background: linear-gradient(90deg, ${nodePalette[0]}, ${nodePalette[1]}, ${nodePalette[2]});"></div><span class="legend-range">${legendStats.minDegree} → ${legendStats.maxDegree}</span>`;
+    const edgeLegend = document.createElement("div");
+    edgeLegend.className = "legend-row";
+    edgeLegend.innerHTML = `<span>Archi</span><div class="legend-bar" style="background: linear-gradient(90deg, ${edgePalette[0]}, ${edgePalette[1]});"></div><span class="legend-range">${legendStats.minStrength} → ${legendStats.maxStrength}</span>`;
+    legend.appendChild(nodeLegend);
+    legend.appendChild(edgeLegend);
+    section.appendChild(legend);
+
     const network = document.createElement("div");
     network.className = "network";
 
@@ -2143,6 +2267,29 @@
     attachNetworkToggle(canvas, toggleEl);
   }
 
+  function getNetworkLegendStats(names, matrix, strengthMatrix) {
+    const edges = [];
+    const strengths = [];
+    for (let i = 0; i < matrix.length; i += 1) {
+      for (let j = i + 1; j < matrix.length; j += 1) {
+        if (matrix[i][j] > 0) {
+          edges.push([i, j]);
+          strengths.push(strengthMatrix?.[i]?.[j] || 0);
+        }
+      }
+    }
+    const nodeWeights = sumRows(matrix);
+    const minDegree = nodeWeights.length ? Math.min(...nodeWeights) : 0;
+    const maxDegree = nodeWeights.length ? Math.max(...nodeWeights) : 0;
+    const strengthRange = minMaxArray(strengths);
+    return {
+      minDegree,
+      maxDegree,
+      minStrength: formatNumber(strengthRange.min),
+      maxStrength: formatNumber(strengthRange.max)
+    };
+  }
+
   function createNetworkState(names, matrix, strengthMatrix, width, height, config) {
     const nodes = names.map((name) => ({ name, x: 0, y: 0 }));
     const edges = [];
@@ -2158,8 +2305,8 @@
 
     layoutGraph(nodes, edges, width, height);
 
-    const degrees = nodes.map((_, idx) => edges.filter((e) => e[0] === idx || e[1] === idx).length);
-    const maxDegree = Math.max(...degrees, 1);
+    const nodeWeights = sumRows(matrix);
+    const maxWeight = Math.max(...nodeWeights, 1);
 
     const strengthRange = minMaxArray(strengths);
     return {
@@ -2167,8 +2314,8 @@
       edges,
       strengths,
       strengthRange,
-      degrees,
-      maxDegree,
+      nodeWeights,
+      maxWeight,
       width,
       height,
       dragIndex: null,
@@ -2179,7 +2326,7 @@
   }
 
   function drawNetwork(ctx, state) {
-    const { nodes, edges, degrees, maxDegree, width, height, strengths, strengthRange, showStrength, nodePalette, edgePalette } = state;
+    const { nodes, edges, nodeWeights, maxWeight, width, height, strengths, strengthRange, showStrength, nodePalette, edgePalette } = state;
     ctx.clearRect(0, 0, width, height);
     ctx.lineWidth = 1.2;
 
@@ -2198,9 +2345,9 @@
     });
 
     nodes.forEach((node, idx) => {
-      const degree = degrees[idx];
-      const radius = 8 + (degree / maxDegree) * 16;
-      const t = degree / maxDegree;
+      const weight = nodeWeights[idx] || 0;
+      const radius = 8 + (weight / maxWeight) * 16;
+      const t = maxWeight === 0 ? 0 : weight / maxWeight;
       const color = interpolateTri(nodePalette, t);
 
       ctx.beginPath();
