@@ -1,1 +1,0 @@
-dopo la tab risposte, crea un'altra tab che mostri per ogni giocatrice in quali x domande (x di default a 3 modificabile) ha ricevuto piu risposte positive, con il numero e in quale negative, con il numero.

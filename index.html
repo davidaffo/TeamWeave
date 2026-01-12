@@ -52,6 +52,10 @@
         <div class="dataset-row">
           <button id="delete-dataset-btn" type="button">Rimuovi dataset</button>
         </div>
+        <div class="dataset-row dataset-manager-row">
+          <label>Dataset visibili e ordine A/B</label>
+          <div id="dataset-manager" class="dataset-manager"></div>
+        </div>
         <div id="compare-row" class="dataset-row">
           <label for="compare-a">Confronto</label>
           <div class="compare-selects">
@@ -82,6 +86,8 @@
     <section id="views" class="views hidden">
       <nav class="tabs" aria-label="Sezioni analisi">
         <button class="tab active" data-view="responses">Risposte</button>
+        <button class="tab" data-view="top-domande">Top domande</button>
+        <button class="tab" data-view="top-ricevute">Top ricevute</button>
         <button class="tab" data-view="matrix-pos">Matrice +</button>
         <button class="tab" data-view="matrix-neg">Matrice -</button>
         <button class="tab" data-view="reciproci-pos">Reciproci +</button>

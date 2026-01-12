@@ -176,6 +176,58 @@ body {
   font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
 }
 
+.dataset-manager {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.dataset-manager-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.dataset-manager-item {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) auto;
+  gap: 0.6rem 1rem;
+  align-items: center;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.8rem;
+  border: 1px solid var(--border);
+  background: #fffefb;
+}
+
+.dataset-manager-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+}
+
+.dataset-manager-toggle input {
+  width: 1rem;
+  height: 1rem;
+}
+
+.dataset-manager-order {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+  font-size: 0.9rem;
+}
+
+.dataset-manager-order label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dataset-manager-order input {
+  width: 1rem;
+  height: 1rem;
+}
+
 .dataset-picker {
   display: grid;
   gap: 0.6rem;
@@ -508,6 +560,81 @@ button:hover {
   font-size: 0.75rem;
   background: #f1e7d2;
   margin-left: 0.4rem;
+}
+
+.top-questions-controls {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.top-questions-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 600;
+}
+
+.top-questions-controls input {
+  width: 4.5rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: #fdfcf8;
+  font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+}
+
+.top-questions-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.top-questions-card h3 {
+  margin: 0 0 0.6rem;
+}
+
+.top-questions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.top-questions-column h4 {
+  margin: 0 0 0.5rem;
+}
+
+.top-questions-items {
+  margin: 0;
+  padding-left: 1.2rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.top-questions-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.5rem;
+}
+
+.top-questions-positive .top-questions-item {
+  background: #e4f5e6;
+}
+
+.top-questions-negative .top-questions-item {
+  background: #fde3e3;
+}
+
+.top-questions-count {
+  font-weight: 700;
+  background: #f1e7d2;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
 }
 
 .network {

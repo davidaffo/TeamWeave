@@ -4,6 +4,7 @@
   const importCodeBtn = document.getElementById("import-code-btn");
   const datasetBox = document.getElementById("dataset-box");
   const datasetSelect = document.getElementById("dataset-select");
+  const datasetManager = document.getElementById("dataset-manager");
   const deleteDatasetBtn = document.getElementById("delete-dataset-btn");
   const compareRow = document.getElementById("compare-row");
   const compareNote = document.getElementById("compare-note");
@@ -67,6 +68,8 @@
   let currentAnalysis = null;
   let currentDatasetId = null;
   let datasetCounter = 1;
+  let visibleDatasetIds = new Set();
+  let hasVisibleState = false;
   let isRestoringDatasets = false;
   const DATASETS_KEY = "teamweave:datasets";
   const DATASET_STATE_KEY = "teamweave:datasetState";
@@ -137,6 +140,7 @@
     const active = getActiveView() || "responses";
     renderView(active);
     saveDatasetState();
+    updateDatasetManager();
   });
 
   compareSelectB.addEventListener("change", () => {
@@ -144,6 +148,7 @@
     const active = getActiveView() || "responses";
     renderView(active);
     saveDatasetState();
+    updateDatasetManager();
   });
 
   importCodeBtn.addEventListener("click", async () => {
@@ -262,8 +267,11 @@
       const dataset = createDatasetFromCsv(text, name);
       if (replaceAll) {
         datasets.length = 0;
+        visibleDatasetIds.clear();
+        hasVisibleState = false;
       }
       datasets.push(dataset);
+      visibleDatasetIds.add(dataset.id);
       datasetCounter = Math.max(datasetCounter, datasets.length + 1);
       saveDatasets();
       setCurrentDataset(dataset.id, { persist });
@@ -347,7 +355,8 @@
       const state = {
         currentDatasetId,
         compareA: compareSelectA?.value || null,
-        compareB: compareSelectB?.value || null
+        compareB: compareSelectB?.value || null,
+        visibleIds: Array.from(visibleDatasetIds)
       };
       localStorage.setItem(DATASET_STATE_KEY, JSON.stringify(state));
     } catch (error) {
@@ -398,6 +407,10 @@
       if (stateRaw) {
         try {
           const state = JSON.parse(stateRaw);
+          if (Array.isArray(state?.visibleIds)) {
+            hasVisibleState = true;
+            visibleDatasetIds = new Set(state.visibleIds);
+          }
           if (state?.currentDatasetId && datasets.some((d) => d.id === state.currentDatasetId)) {
             nextId = state.currentDatasetId;
           }
@@ -508,6 +521,19 @@
         positive: idx % 2 === 0
       };
     });
+    const posQuestionLabels = [];
+    const negQuestionLabels = [];
+    const posIndexByMeta = [];
+    const negIndexByMeta = [];
+    questionMeta.forEach((meta, idx) => {
+      if (meta.positive) {
+        posIndexByMeta[idx] = posQuestionLabels.length;
+        posQuestionLabels.push(meta.question);
+        return;
+      }
+      negIndexByMeta[idx] = negQuestionLabels.length;
+      negQuestionLabels.push(meta.question);
+    });
 
     const names = [];
     const nameIndexMap = new Map();
@@ -536,6 +562,8 @@
     const negMatrix = createMatrix(size, 0);
     const receivedPosByCat = initCategoryMap(names, CATEGORIES);
     const receivedNegByCat = initCategoryMap(names, CATEGORIES);
+    const posReceivedByQuestion = createRectMatrix(size, posQuestionLabels.length, 0);
+    const negReceivedByQuestion = createRectMatrix(size, negQuestionLabels.length, 0);
     const unknownSelections = new Set();
     const missingCategories = new Set();
 
@@ -575,11 +603,19 @@
               posMatrix[chooserIndex][pickIndex] += 1;
             }
             receivedPosByCat.get(pickKey)[meta.category] += 1;
+            const qIndex = posIndexByMeta[idx];
+            if (qIndex != null) {
+              posReceivedByQuestion[pickIndex][qIndex] += 1;
+            }
           } else {
             if (chooserIndex !== pickIndex) {
               negMatrix[chooserIndex][pickIndex] += 1;
             }
             receivedNegByCat.get(pickKey)[meta.category] += 1;
+            const qIndex = negIndexByMeta[idx];
+            if (qIndex != null) {
+              negReceivedByQuestion[pickIndex][qIndex] += 1;
+            }
           }
         });
       });
@@ -683,6 +719,12 @@
       summaryRows,
       averages,
       classifications,
+      questionStats: {
+        posLabels: posQuestionLabels,
+        negLabels: negQuestionLabels,
+        posReceivedByQuestion,
+        negReceivedByQuestion
+      },
       warnings: {
         unknownSelections: Array.from(unknownSelections).sort(),
         missingCategories: Array.from(missingCategories).sort()
@@ -724,6 +766,10 @@
 
   function createMatrix(size, fillValue) {
     return Array.from({ length: size }, () => Array(size).fill(fillValue));
+  }
+
+  function createRectMatrix(rows, cols, fillValue) {
+    return Array.from({ length: rows }, () => Array(cols).fill(fillValue));
   }
 
   function initCategoryMap(names, categories) {
@@ -975,6 +1021,7 @@
       return;
     }
     datasets.splice(index, 1);
+    visibleDatasetIds.delete(id);
     saveDatasets();
     if (!datasets.length) {
       currentDatasetId = null;
@@ -992,9 +1039,139 @@
     setStatus("Dataset rimosso.", false);
   }
 
+  function ensureVisibleDatasetIds() {
+    if (IS_EXPORT_MODE) {
+      return false;
+    }
+    const validIds = new Set(datasets.map((dataset) => dataset.id));
+    let changed = false;
+    visibleDatasetIds.forEach((id) => {
+      if (!validIds.has(id)) {
+        visibleDatasetIds.delete(id);
+        changed = true;
+      }
+    });
+    if (!visibleDatasetIds.size && !hasVisibleState) {
+      datasets.forEach((dataset) => visibleDatasetIds.add(dataset.id));
+      changed = true;
+    }
+    return changed;
+  }
+
+  function getVisibleDatasetIds() {
+    if (IS_EXPORT_MODE) {
+      return new Set(datasets.map((dataset) => dataset.id));
+    }
+    ensureVisibleDatasetIds();
+    return new Set(visibleDatasetIds);
+  }
+
+  function getVisibleDatasets() {
+    const visibleIds = getVisibleDatasetIds();
+    return datasets.filter((dataset) => visibleIds.has(dataset.id));
+  }
+
+  function updateDatasetManager() {
+    if (!datasetManager) {
+      return;
+    }
+    datasetManager.textContent = "";
+    if (!datasets.length) {
+      return;
+    }
+    const visibleIds = getVisibleDatasetIds();
+    const list = document.createElement("div");
+    list.className = "dataset-manager-grid";
+    datasets.forEach((dataset) => {
+      const row = document.createElement("div");
+      row.className = "dataset-manager-item";
+
+      const toggleLabel = document.createElement("label");
+      toggleLabel.className = "dataset-manager-toggle";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = visibleIds.has(dataset.id);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+          visibleDatasetIds.add(dataset.id);
+        } else {
+          visibleDatasetIds.delete(dataset.id);
+        }
+        hasVisibleState = true;
+        const active = getActiveView() || "responses";
+        updateDatasetControls();
+        renderView(active);
+      });
+      const name = document.createElement("span");
+      name.textContent = dataset.name;
+      toggleLabel.appendChild(checkbox);
+      toggleLabel.appendChild(name);
+
+      const orderGroup = document.createElement("div");
+      orderGroup.className = "dataset-manager-order";
+      const radioA = document.createElement("input");
+      radioA.type = "radio";
+      radioA.name = "dataset-order-a";
+      radioA.value = dataset.id;
+      radioA.checked = compareSelectA.value === dataset.id;
+      radioA.addEventListener("change", () => {
+        if (!visibleDatasetIds.has(dataset.id)) {
+          visibleDatasetIds.add(dataset.id);
+          checkbox.checked = true;
+          hasVisibleState = true;
+        }
+        compareSelectA.value = dataset.id;
+        ensureCompareSelection();
+        const active = getActiveView() || "responses";
+        renderView(active);
+        saveDatasetState();
+        updateDatasetManager();
+      });
+      const labelA = document.createElement("label");
+      labelA.appendChild(radioA);
+      labelA.appendChild(document.createTextNode("A"));
+
+      const radioB = document.createElement("input");
+      radioB.type = "radio";
+      radioB.name = "dataset-order-b";
+      radioB.value = dataset.id;
+      radioB.checked = compareSelectB.value === dataset.id;
+      radioB.addEventListener("change", () => {
+        if (!visibleDatasetIds.has(dataset.id)) {
+          visibleDatasetIds.add(dataset.id);
+          checkbox.checked = true;
+          hasVisibleState = true;
+        }
+        compareSelectB.value = dataset.id;
+        ensureCompareSelection();
+        const active = getActiveView() || "responses";
+        renderView(active);
+        saveDatasetState();
+        updateDatasetManager();
+      });
+      const labelB = document.createElement("label");
+      labelB.appendChild(radioB);
+      labelB.appendChild(document.createTextNode("B"));
+
+      orderGroup.appendChild(labelA);
+      orderGroup.appendChild(labelB);
+
+      row.appendChild(toggleLabel);
+      row.appendChild(orderGroup);
+      list.appendChild(row);
+    });
+    datasetManager.appendChild(list);
+  }
+
   function setCurrentDataset(id, options = {}) {
     const { persist = true } = options;
-    const dataset = datasets.find((entry) => entry.id === id);
+    const visibleIds = getVisibleDatasetIds();
+    let targetId = id;
+    if (visibleIds.size && !visibleIds.has(targetId)) {
+      const fallback = datasets.find((entry) => visibleIds.has(entry.id));
+      targetId = fallback ? fallback.id : id;
+    }
+    const dataset = datasets.find((entry) => entry.id === targetId);
     if (!dataset) {
       return;
     }
@@ -1025,11 +1202,36 @@
       return;
     }
     datasetBox.classList.remove("hidden");
-    populateDatasetSelect(datasetSelect, currentDatasetId);
-    populateDatasetSelect(compareSelectA, compareSelectA.value);
-    populateDatasetSelect(compareSelectB, compareSelectB.value);
+    const visibleIds = getVisibleDatasetIds();
+    const visibleDatasets = getVisibleDatasets();
+    updateDatasetManager();
+    if (!visibleDatasets.length) {
+      currentDatasetId = null;
+      currentAnalysis = null;
+      summaryEl.classList.add("hidden");
+      viewsEl.classList.add("hidden");
+      viewContainer.classList.add("hidden");
+      compareRow.classList.add("hidden");
+      compareNote.classList.add("hidden");
+      compareSelectA.value = "";
+      compareSelectB.value = "";
+      compareSelectA.selectedIndex = -1;
+      compareSelectB.selectedIndex = -1;
+      if (!isRestoringDatasets) {
+        saveDatasetState();
+      }
+      return;
+    }
+    if (currentDatasetId && !visibleIds.has(currentDatasetId)) {
+      setCurrentDataset(visibleDatasets[0].id, { persist: false });
+      return;
+    }
+    viewContainer.classList.remove("hidden");
+    populateDatasetSelect(datasetSelect, currentDatasetId, visibleDatasets);
+    populateDatasetSelect(compareSelectA, compareSelectA.value, visibleDatasets);
+    populateDatasetSelect(compareSelectB, compareSelectB.value, visibleDatasets);
     ensureCompareSelection();
-    const showCompare = datasets.length >= 2;
+    const showCompare = visibleDatasets.length >= 2;
     compareRow.classList.toggle("hidden", !showCompare);
     compareNote.classList.toggle("hidden", !showCompare);
     compareSelectA.disabled = !showCompare;
@@ -1163,17 +1365,17 @@
     setCurrentDataset(ordered[0], { persist: false });
   }
 
-  function populateDatasetSelect(select, selectedId) {
+  function populateDatasetSelect(select, selectedId, source = datasets) {
     select.textContent = "";
-    datasets.forEach((dataset) => {
+    source.forEach((dataset) => {
       const option = document.createElement("option");
       option.value = dataset.id;
       option.textContent = dataset.name;
       select.appendChild(option);
     });
-    const targetId = datasets.some((dataset) => dataset.id === selectedId)
+    const targetId = source.some((dataset) => dataset.id === selectedId)
       ? selectedId
-      : datasets[0]?.id;
+      : source[0]?.id;
     if (targetId) {
       select.value = targetId;
     }
@@ -1183,13 +1385,25 @@
     if (IS_EXPORT_MODE) {
       return;
     }
-    if (datasets.length < 2) {
+    const visibleDatasets = getVisibleDatasets();
+    if (visibleDatasets.length < 2) {
+      if (visibleDatasets.length === 1) {
+        compareSelectA.value = visibleDatasets[0].id;
+        compareSelectB.value = visibleDatasets[0].id;
+      }
       return;
     }
+    const visibleIds = visibleDatasets.map((dataset) => dataset.id);
+    if (!visibleIds.includes(compareSelectA.value)) {
+      compareSelectA.value = visibleIds[0];
+    }
+    if (!visibleIds.includes(compareSelectB.value)) {
+      compareSelectB.value = visibleIds[1] || visibleIds[0];
+    }
     if (compareSelectA.value === compareSelectB.value) {
-      const alternative = datasets.find((dataset) => dataset.id !== compareSelectA.value);
+      const alternative = visibleIds.find((id) => id !== compareSelectA.value);
       if (alternative) {
-        compareSelectB.value = alternative.id;
+        compareSelectB.value = alternative;
       }
     }
   }
@@ -1258,6 +1472,14 @@
       case "responses":
         return (analysis, container) => {
           container.appendChild(renderResponsesSection(analysis));
+        };
+      case "top-domande":
+        return (analysis, container) => {
+          container.appendChild(renderTopQuestionsSection(analysis));
+        };
+      case "top-ricevute":
+        return (analysis, container) => {
+          container.appendChild(renderTopRecipientsSection(analysis));
         };
       case "matrix-neg":
         return (analysis, container) => {
@@ -1499,11 +1721,12 @@
   }
 
   function getCompareDatasets() {
-    if (datasets.length < 2) {
+    const visibleDatasets = getVisibleDatasets();
+    if (visibleDatasets.length < 2) {
       return null;
     }
-    const datasetA = datasets.find((dataset) => dataset.id === compareSelectA.value);
-    const datasetB = datasets.find((dataset) => dataset.id === compareSelectB.value);
+    const datasetA = visibleDatasets.find((dataset) => dataset.id === compareSelectA.value);
+    const datasetB = visibleDatasets.find((dataset) => dataset.id === compareSelectB.value);
     if (!datasetA || !datasetB || datasetA.id === datasetB.id) {
       return null;
     }
@@ -2447,6 +2670,274 @@
     });
 
     return section;
+  }
+
+  function renderTopQuestionsSection(analysis) {
+    const section = document.createElement("div");
+    const heading = document.createElement("h2");
+    heading.textContent = "Domande con pi\u00f9 risposte ricevute";
+    section.appendChild(heading);
+
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "Per ogni atleta mostra le domande con pi\u00f9 risposte positive e negative ricevute.";
+    section.appendChild(note);
+
+    const controls = document.createElement("div");
+    controls.className = "top-questions-controls";
+    const label = document.createElement("label");
+    label.textContent = "Numero di domande per atleta";
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    const maxLimit = Math.max(analysis.questionStats.posLabels.length, analysis.questionStats.negLabels.length, 1);
+    input.max = String(maxLimit);
+    input.value = "3";
+    label.appendChild(input);
+    controls.appendChild(label);
+    section.appendChild(controls);
+
+    const list = document.createElement("div");
+    list.className = "top-questions-list";
+    section.appendChild(list);
+
+    const renderList = (limit) => {
+      list.innerHTML = "";
+      analysis.names.forEach((name, index) => {
+        const card = document.createElement("div");
+        card.className = "response-card top-questions-card";
+
+        const title = document.createElement("h3");
+        title.textContent = name;
+        card.appendChild(title);
+
+        const grid = document.createElement("div");
+        grid.className = "top-questions-grid";
+
+        grid.appendChild(renderTopQuestionColumn(
+          "Positive ricevute",
+          analysis.questionStats.posLabels,
+          analysis.questionStats.posReceivedByQuestion[index],
+          limit,
+          "positive"
+        ));
+        grid.appendChild(renderTopQuestionColumn(
+          "Negative ricevute",
+          analysis.questionStats.negLabels,
+          analysis.questionStats.negReceivedByQuestion[index],
+          limit,
+          "negative"
+        ));
+
+        card.appendChild(grid);
+        list.appendChild(card);
+      });
+    };
+
+    const normalizeLimit = () => {
+      const parsed = Number.parseInt(input.value, 10);
+      const safe = Number.isFinite(parsed) ? parsed : 1;
+      return Math.max(1, Math.min(maxLimit, safe));
+    };
+
+    input.addEventListener("input", () => {
+      const limit = normalizeLimit();
+      input.value = String(limit);
+      renderList(limit);
+    });
+
+    renderList(normalizeLimit());
+    return section;
+  }
+
+  function renderTopRecipientsSection(analysis) {
+    const section = document.createElement("div");
+    const heading = document.createElement("h2");
+    heading.textContent = "Atlete pi\u00f9 scelte per domanda";
+    section.appendChild(heading);
+
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "Per ogni domanda mostra le atlete che hanno ricevuto pi\u00f9 risposte.";
+    section.appendChild(note);
+
+    const controls = document.createElement("div");
+    controls.className = "top-questions-controls";
+    const label = document.createElement("label");
+    label.textContent = "Numero di atlete per domanda";
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "1";
+    input.max = String(Math.max(analysis.names.length, 1));
+    input.value = "3";
+    label.appendChild(input);
+    controls.appendChild(label);
+    section.appendChild(controls);
+
+    const list = document.createElement("div");
+    list.className = "top-questions-list";
+    section.appendChild(list);
+
+    const renderList = (limit) => {
+      list.innerHTML = "";
+      const grid = document.createElement("div");
+      grid.className = "top-questions-grid";
+      const posGroup = document.createElement("div");
+      const posHeading = document.createElement("h3");
+      posHeading.textContent = "Domande positive";
+      posGroup.appendChild(posHeading);
+      const posList = document.createElement("div");
+      posList.className = "top-questions-list";
+      analysis.questionStats.posLabels.forEach((question, index) => {
+        posList.appendChild(renderTopRecipientsQuestionCard(
+          question,
+          analysis.names,
+          analysis.questionStats.posReceivedByQuestion,
+          index,
+          limit,
+          "positive"
+        ));
+      });
+      posGroup.appendChild(posList);
+      grid.appendChild(posGroup);
+
+      const negGroup = document.createElement("div");
+      const negHeading = document.createElement("h3");
+      negHeading.textContent = "Domande negative";
+      negGroup.appendChild(negHeading);
+      const negList = document.createElement("div");
+      negList.className = "top-questions-list";
+      analysis.questionStats.negLabels.forEach((question, index) => {
+        negList.appendChild(renderTopRecipientsQuestionCard(
+          question,
+          analysis.names,
+          analysis.questionStats.negReceivedByQuestion,
+          index,
+          limit,
+          "negative"
+        ));
+      });
+      negGroup.appendChild(negList);
+      grid.appendChild(negGroup);
+      list.appendChild(grid);
+    };
+
+    const normalizeLimit = () => {
+      const parsed = Number.parseInt(input.value, 10);
+      const safe = Number.isFinite(parsed) ? parsed : 1;
+      const max = Math.max(analysis.names.length, 1);
+      return Math.max(1, Math.min(max, safe));
+    };
+
+    input.addEventListener("input", () => {
+      const limit = normalizeLimit();
+      input.value = String(limit);
+      renderList(limit);
+    });
+
+    renderList(normalizeLimit());
+    return section;
+  }
+
+  function renderTopRecipientsQuestionCard(question, names, matrixByAthlete, questionIndex, limit, tone) {
+    const card = document.createElement("div");
+    card.className = "response-card top-questions-card";
+    if (tone === "positive") {
+      card.classList.add("top-questions-positive");
+    } else if (tone === "negative") {
+      card.classList.add("top-questions-negative");
+    }
+
+    const title = document.createElement("h3");
+    title.textContent = question;
+    card.appendChild(title);
+
+    const items = buildTopRecipientsList(names, matrixByAthlete, questionIndex, limit);
+    if (!items.length) {
+      const empty = document.createElement("p");
+      empty.className = "note";
+      empty.textContent = "Nessuna risposta.";
+      card.appendChild(empty);
+      return card;
+    }
+
+    const list = document.createElement("ol");
+    list.className = "top-questions-items";
+    items.forEach((item) => {
+      const li = document.createElement("li");
+      li.className = "top-questions-item";
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      const count = document.createElement("span");
+      count.className = "top-questions-count";
+      count.textContent = item.count;
+      li.appendChild(label);
+      li.appendChild(count);
+      list.appendChild(li);
+    });
+    card.appendChild(list);
+    return card;
+  }
+
+  function renderTopQuestionColumn(title, labels, counts = [], limit, tone) {
+    const column = document.createElement("div");
+    column.className = "top-questions-column";
+    if (tone === "positive") {
+      column.classList.add("top-questions-positive");
+    } else if (tone === "negative") {
+      column.classList.add("top-questions-negative");
+    }
+
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    column.appendChild(heading);
+
+    const items = buildTopQuestionList(labels, counts, limit);
+    if (!items.length) {
+      const empty = document.createElement("p");
+      empty.className = "note";
+      empty.textContent = "Nessuna risposta.";
+      column.appendChild(empty);
+      return column;
+    }
+
+    const list = document.createElement("ol");
+    list.className = "top-questions-items";
+    items.forEach((item) => {
+      const li = document.createElement("li");
+      li.className = "top-questions-item";
+      const label = document.createElement("span");
+      label.textContent = item.label;
+      const count = document.createElement("span");
+      count.className = "top-questions-count";
+      count.textContent = item.count;
+      li.appendChild(label);
+      li.appendChild(count);
+      list.appendChild(li);
+    });
+    column.appendChild(list);
+
+    return column;
+  }
+
+  function buildTopQuestionList(labels, counts, limit) {
+    return labels
+      .map((label, index) => ({ label, count: counts[index] || 0, index }))
+      .filter((item) => item.count > 0)
+      .sort((a, b) => (b.count === a.count ? a.index - b.index : b.count - a.count))
+      .slice(0, limit);
+  }
+
+  function buildTopRecipientsList(names, matrixByAthlete, questionIndex, limit) {
+    return names
+      .map((name, index) => ({
+        label: name,
+        count: (matrixByAthlete[index] || [])[questionIndex] || 0,
+        index
+      }))
+      .filter((item) => item.count > 0)
+      .sort((a, b) => (b.count === a.count ? a.index - b.index : b.count - a.count))
+      .slice(0, limit);
   }
 
   function buildResponsesData(analysis) {
