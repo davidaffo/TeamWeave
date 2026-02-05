@@ -111,7 +111,18 @@
 
     <section id="generator-section" class="panel hidden">
       <h2>Generatore test</h2>
-      <p class="note">Incolla giocatrici e domande per generare lo script App Script del test TeamWeave. Le domande sono automaticamente alternate: la prima positiva, la seconda negativa, e così via. Procedura: 1) Compila i campi. 2) Clicca “Genera script”. 3) In Google Drive crea un nuovo foglio “Apps Script”, incolla lo script e salvalo. 4) Premi “Esegui” per creare il form. 5) Apri il link nel log della console per modificarlo.</p>
+      <p class="note">Incolla giocatrici e domande per generare lo script App Script del test TeamWeave.
+Lo script generato va utilizzato sugli script di google per generare il Google Form corrispondente al test.
+Ogni domanda positiva deve essere seguita dal suo corrispettivo negativo, non ci possono essere domande senza una delle due parti, il programma prende automaticamente una domanda dopo l'altra, la prima come positiva e la seconda come negativa.<br>
+Procedura da seguire:<br>
+1) Compila i campi con l'elenco delle giocatrici e l'elenco di domande.<br>
+2) Dopo aver compilato le domande, compariranno nel selezionatore di categoria. Seleziona la categoria a cui appartiene ogni gruppo di domande. Se le domande vengono da un test precedente, hanno il tag della categoria, che viene automaticamente riconosciuto dal programma e pre impostato. Dopo aver selezionato le categorie, puoi scaricare le domande in un file di testo con il tag di categoria gia' impostato, in modo da poterlo utilizzare in test successivi senza selezionare a mano le categorie.<br>
+3) Clicca “Genera script”.<br>
+4) In Google Drive crea un nuovo foglio “Apps Script” o usa quello che hai già usato per gli altri test, incolla lo script e salvalo.<br>
+5) Premi “Esegui” per creare il form. Lo troverai nel tuo Google Drive e nel link che ti viene fornito dopo l'esecuzione.<br>
+6) Apri il form, applica le modifiche che preferisci e poi fallo compilare alla squadra.<br>
+7) Una volta raccolte tutte le risposte, collega il form a un Foglio Google tramite l'apposito tasto.<br>
+8) Scarica il foglio Google come file .csv e caricalo nella tab di analisi per aggiungerlo ai test analizzati. Puoi confrontare e analizzare fino a 2 test contemporaneamente.<br></p>
       <div class="form-grid">
         <label for="tw-form-title">Titolo del form</label>
         <input id="tw-form-title" type="text" value="Test Sociometrico [Squadra]" />
