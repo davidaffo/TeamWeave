@@ -3,6 +3,20 @@
   const importCodeInput = document.getElementById("import-code");
   const importCodeBtn = document.getElementById("import-code-btn");
   const datasetBox = document.getElementById("dataset-box");
+  const mainTabs = Array.from(document.querySelectorAll(".main-tab"));
+  const analysisSection = document.getElementById("analysis-section");
+  const generatorSection = document.getElementById("generator-section");
+  const twFormTitle = document.getElementById("tw-form-title");
+  const twFormLimit = document.getElementById("tw-form-limit");
+  const twFormPlayers = document.getElementById("tw-form-players");
+  const twFormQuestions = document.getElementById("tw-form-questions");
+  const twFormCategories = document.getElementById("tw-form-categories");
+  const twFormConvert = document.getElementById("tw-form-convert");
+  const twFormCopy = document.getElementById("tw-form-copy");
+  const twFormDownload = document.getElementById("tw-form-download");
+  const twFormDownloadQuestions = document.getElementById("tw-form-download-questions");
+  const twFormOutput = document.getElementById("tw-form-output");
+  const twFormPreview = document.getElementById("tw-form-preview");
   const datasetSelect = document.getElementById("dataset-select");
   const datasetManager = document.getElementById("dataset-manager");
   const deleteDatasetBtn = document.getElementById("delete-dataset-btn");
@@ -70,6 +84,7 @@
   let datasetCounter = 1;
   let visibleDatasetIds = new Set();
   let hasVisibleState = false;
+  let latestTeamweaveScript = "";
   let isRestoringDatasets = false;
   const DATASETS_KEY = "teamweave:datasets";
   const DATASET_STATE_KEY = "teamweave:datasetState";
@@ -239,6 +254,22 @@
     });
   });
 
+  mainTabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      mainTabs.forEach((btn) => btn.classList.remove("active"));
+      tab.classList.add("active");
+      const target = tab.dataset.main;
+      const isGenerator = target === "generator";
+      if (analysisSection) {
+        analysisSection.classList.toggle("hidden", isGenerator);
+      }
+      if (generatorSection) {
+        generatorSection.classList.toggle("hidden", !isGenerator);
+      }
+    });
+  });
+
+  initTeamweaveFormGenerator();
   initializeFromStorage();
 
   function readFile(file) {
@@ -514,9 +545,11 @@
 
     const questionHeaders = headers.slice(firstQuestionIndex);
     const questionMeta = questionHeaders.map((question, idx) => {
-      const category = CATEGORY_MAP_NORMALIZED.get(normalizeQuestion(question)) || null;
+      const tagged = extractCategoryTag(question);
+      const normalized = normalizeQuestion(tagged.question);
+      const category = tagged.category || CATEGORY_MAP_NORMALIZED.get(normalized) || null;
       return {
-        question,
+        question: tagged.question,
         category,
         positive: idx % 2 === 0
       };
@@ -746,12 +779,35 @@
     return name.trim().replace(/\s+/g, " ").toLowerCase();
   }
 
+  function extractCategoryTag(question) {
+    const raw = String(question || "");
+    const match = raw.match(/^\s*\[(Tecniche|Attitudinali|Sociali)\]\s*/i);
+    if (!match) {
+      return { question: raw, category: null };
+    }
+    const cleaned = raw.slice(match[0].length).trim();
+    const lowered = match[1].toLowerCase();
+    const category = lowered.startsWith("tec")
+      ? "Tecniche"
+      : lowered.startsWith("att")
+        ? "Attitudinali"
+        : "Sociali";
+    return { question: cleaned || raw, category };
+  }
+
   function normalizeQuestion(question) {
     return question
       .trim()
       .replace(/[’‘]/g, "'")
       .replace(/\s+/g, " ")
       .toLowerCase();
+  }
+
+  function escapeQuotes(text) {
+    return String(text || "")
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\r?\n/g, "\\n");
   }
 
   function splitNames(value) {
@@ -1258,8 +1314,20 @@
     if (description) {
       description.textContent = "Seleziona uno o due dataset da visualizzare.";
     }
+    if (analysisSection) {
+      analysisSection.classList.remove("hidden");
+    }
+    if (generatorSection) {
+      generatorSection.classList.add("hidden");
+    }
+    if (mainTabs.length) {
+      mainTabs.forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.main === "analysis");
+        btn.classList.add("hidden");
+      });
+    }
     panel.querySelectorAll(
-      "button, .export-box, .import-box, .upload-row, .dataset-row, #compare-row, #compare-note, #status, #file-input, #import-code, #export-link"
+      "button, .export-box, .import-box, .tw-form-box, .upload-row, .dataset-row, #compare-row, #compare-note, #status, #file-input, #import-code, #export-link"
     ).forEach((el) => {
       el.classList.add("hidden");
     });
@@ -2938,6 +3006,283 @@
       .filter((item) => item.count > 0)
       .sort((a, b) => (b.count === a.count ? a.index - b.index : b.count - a.count))
       .slice(0, limit);
+  }
+
+  function parseList(text) {
+    return String(text || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function titleCaseName(value) {
+    return String(value || "")
+      .trim()
+      .split(/\s+/)
+      .map((part) => {
+        if (!part) {
+          return "";
+        }
+        const lower = part.toLowerCase();
+        return lower.charAt(0).toUpperCase() + lower.slice(1);
+      })
+      .join(" ");
+  }
+
+  function extractInlineCategory(text, fallback) {
+    const raw = String(text || "");
+    const match = raw.match(/^\s*\[(Tecniche|Attitudinali|Sociali)\]\s*/i);
+    if (!match) {
+      return { category: fallback, question: raw.trim() };
+    }
+    const lowered = match[1].toLowerCase();
+    const category = lowered.startsWith("tec")
+      ? "Tecniche"
+      : lowered.startsWith("att")
+        ? "Attitudinali"
+        : "Sociali";
+    const question = raw.slice(match[0].length).trim();
+    return { category, question: question || raw.trim() };
+  }
+
+  function parseTeamweaveQuestions(text, categories) {
+    const lines = parseList(text);
+    const pos = [];
+    const neg = [];
+    lines.forEach((line, index) => {
+      const current = line.trim();
+      if (!current) {
+        return;
+      }
+      const pairIndex = Math.floor(index / 2);
+      const category = categories[pairIndex] || "Tecniche";
+      const question = `[${category}] ${current}`;
+      if (index % 2 === 0) {
+        pos.push(question);
+      } else {
+        neg.push(question);
+      }
+    });
+    return { pos, neg };
+  }
+
+  function buildTeamweaveFormScript(players, questions, options) {
+    const { title, limit } = options;
+    const formTitle = title || "Test TeamWeave";
+    const description = buildTeamweaveDescription(limit);
+    const lines = [
+      "function buildTeamWeaveForm() {",
+      `  var form = FormApp.create("${escapeQuotes(formTitle)}");`,
+      `  form.setDescription("${escapeQuotes(description)}");`,
+      `  var players = [${players.map((name) => `"${escapeQuotes(name)}"`).join(", ")}];`,
+      "  var nameItem = form.addListItem();",
+      "  nameItem.setTitle(\"Seleziona il tuo nome\").setChoiceValues(players).setRequired(true);"
+    ];
+
+    const max = Math.max(questions.pos.length, questions.neg.length);
+    for (let i = 0; i < max; i += 1) {
+      if (questions.pos[i]) {
+        lines.push("  var item = form.addCheckboxItem();");
+        lines.push(`  item.setTitle("${escapeQuotes(questions.pos[i])}").setChoiceValues(players).setRequired(false);`);
+        lines.push(`  item.setValidation(FormApp.createCheckboxValidation().requireSelectAtMost(${limit}).build());`);
+      }
+      if (questions.neg[i]) {
+        lines.push("  var item = form.addCheckboxItem();");
+        lines.push(`  item.setTitle("${escapeQuotes(questions.neg[i])}").setChoiceValues(players).setRequired(false);`);
+        lines.push(`  item.setValidation(FormApp.createCheckboxValidation().requireSelectAtMost(${limit}).build());`);
+      }
+    }
+
+    lines.push("  Logger.log(\"Form creato: \" + form.getEditUrl());");
+    lines.push("}");
+    return lines.join("\n");
+  }
+
+  function buildTeamweaveDescription(limit) {
+    const max = Number.isFinite(limit) ? limit : 3;
+    return [
+      "Questo questionario serve a capire meglio le relazioni, la comunicazione e la coesione all’interno della squadra. Le tue risposte aiuteranno l’allenatore a conoscere il gruppo e a migliorare il clima di squadra, l’organizzazione e la collaborazione tra compagne.",
+      "",
+      "• Non ci sono risposte giuste o sbagliate: rispondi con sincerità.",
+      "• Nessuno oltre all’allenatore leggerà le risposte, e non verranno mai condivise con la squadra.",
+      "• Non si può rispondere con “tutte”: scegli le migliori " + max + " (o le prime " + max + " che ti vengono in mente).",
+      "• Non vi preoccupate di escludere qualcuno: mettete le prime " + max + " persone che vi vengono in mente.",
+      "• Potete mettere da 0 a " + max + " risposte. Nelle domande positive è importante sforzarsi di mettere " + max + " risposte (a meno che proprio non ci siano).",
+      "• Siate oggettive nelle domande puramente tecniche (es. “chi sceglieresti per fare una squadra forte”).",
+      "• Nessuno saprà le vostre risposte oltre all’allenatore: siate sincere.",
+      "• Non potete auto-votarvi."
+    ].join("\n");
+  }
+
+  function initTeamweaveFormGenerator() {
+    if (!twFormTitle || !twFormPlayers || !twFormQuestions) {
+      return;
+    }
+
+    function getCategorySelections() {
+      if (!twFormCategories) {
+        return [];
+      }
+      const selections = [];
+      const rows = Array.from(twFormCategories.querySelectorAll(".tw-category-row"));
+      rows.forEach((row) => {
+        const checked = row.querySelector("input[type=\"radio\"]:checked");
+        if (checked) {
+          selections.push(checked.value);
+        }
+      });
+      return selections;
+    }
+
+    function renderCategorySelectors() {
+      if (!twFormCategories) {
+        return;
+      }
+      const lines = parseList(twFormQuestions.value);
+      const pairCount = Math.ceil(lines.length / 2);
+      const prev = getCategorySelections();
+      const detected = [];
+      for (let i = 0; i < pairCount; i += 1) {
+        const first = extractInlineCategory(lines[i * 2] || "", null);
+        const second = extractInlineCategory(lines[i * 2 + 1] || "", null);
+        detected.push(first.category || second.category || null);
+      }
+      twFormCategories.innerHTML = "";
+      for (let i = 0; i < pairCount; i += 1) {
+        const row = document.createElement("div");
+        row.className = "tw-category-row";
+        const label = document.createElement("span");
+        label.className = "tw-category-label";
+        const first = lines[i * 2] || "";
+        const second = lines[i * 2 + 1] || "";
+        if (second) {
+          label.innerHTML = `<strong>${escapeHtml(first)}</strong><span class="tw-category-sep"> / </span>${escapeHtml(second)}`;
+        } else {
+          label.textContent = first || `Domanda ${i * 2 + 1}`;
+        }
+        row.appendChild(label);
+
+        const options = document.createElement("div");
+        options.className = "tw-category-options";
+        ["Tecniche", "Attitudinali", "Sociali"].forEach((value) => {
+          const radioLabel = document.createElement("label");
+          radioLabel.className = "tw-category-option";
+          const input = document.createElement("input");
+          input.type = "radio";
+          input.name = `tw-cat-${i}`;
+          input.value = value;
+          const preferred = prev[i] || detected[i] || "Tecniche";
+          if (preferred === value) {
+            input.checked = true;
+          }
+          radioLabel.appendChild(input);
+          radioLabel.appendChild(document.createTextNode(value));
+          options.appendChild(radioLabel);
+        });
+        row.appendChild(options);
+        twFormCategories.appendChild(row);
+      }
+    }
+
+    function renderPreview(questions) {
+      const items = [];
+      questions.pos.forEach((q) => items.push(`✅ ${q}`));
+      questions.neg.forEach((q) => items.push(`❌ ${q}`));
+      if (!items.length) {
+        twFormPreview.innerHTML = "<p class=\"note\">Nessuna domanda rilevata.</p>";
+        return;
+      }
+      twFormPreview.innerHTML = items.map((q) => `<div class="question">${escapeHtml(q)}</div>`).join("");
+    }
+
+    function convert() {
+      const players = parseList(twFormPlayers.value).map(titleCaseName).filter(Boolean);
+      if (!players.length) {
+        twFormOutput.textContent = "Inserisci almeno una giocatrice.";
+        twFormPreview.innerHTML = "";
+        return;
+      }
+      const lines = parseList(twFormQuestions.value);
+      if (lines.length % 2 !== 0) {
+        twFormOutput.textContent = "Le domande devono essere in numero pari (positiva + negativa).";
+        twFormPreview.innerHTML = "";
+        return;
+      }
+      const limit = Number(twFormLimit?.value) || 1;
+      const categories = getCategorySelections();
+      const questions = parseTeamweaveQuestions(
+        lines.map((line) => extractInlineCategory(line, "Tecniche").question).join("\n"),
+        categories
+      );
+      latestTeamweaveScript = buildTeamweaveFormScript(players, questions, {
+        title: twFormTitle.value,
+        limit
+      });
+      twFormOutput.textContent = latestTeamweaveScript;
+      renderPreview(questions);
+    }
+
+    function copyScript() {
+      if (!latestTeamweaveScript) {
+        convert();
+      }
+      if (!latestTeamweaveScript) {
+        return;
+      }
+      navigator.clipboard?.writeText(latestTeamweaveScript).then(() => {
+        twFormOutput.textContent = `${latestTeamweaveScript}\n// Copiato negli appunti.`;
+      }).catch(() => {
+        twFormOutput.textContent = `${latestTeamweaveScript}\n// Copia non riuscita.`;
+      });
+    }
+
+    function downloadScript() {
+      if (!latestTeamweaveScript) {
+        convert();
+      }
+      if (!latestTeamweaveScript) {
+        return;
+      }
+      const blob = new Blob([latestTeamweaveScript], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "teamweave-form.gs";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    twFormQuestions.addEventListener("input", renderCategorySelectors);
+    renderCategorySelectors();
+
+    twFormConvert?.addEventListener("click", convert);
+    twFormCopy?.addEventListener("click", copyScript);
+    twFormDownload?.addEventListener("click", downloadScript);
+    twFormDownloadQuestions?.addEventListener("click", () => {
+      const lines = parseList(twFormQuestions.value);
+      if (!lines.length) {
+        twFormOutput.textContent = "Inserisci almeno una domanda.";
+        return;
+      }
+      const categories = getCategorySelections();
+      const tagged = lines.map((line, index) => {
+        const pairIndex = Math.floor(index / 2);
+        const category = categories[pairIndex] || "Tecniche";
+        const cleaned = extractInlineCategory(line, category).question;
+        return `[${category}] ${cleaned}`;
+      }).join("\n");
+      const blob = new Blob([tagged], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "teamweave-domande.txt";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    });
   }
 
   function buildResponsesData(analysis) {

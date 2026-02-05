@@ -20,7 +20,13 @@
   </header>
 
   <main class="main">
-    <section class="panel upload-panel">
+    <nav class="main-tabs" aria-label="Sezioni principali">
+      <button class="main-tab active" data-main="analysis">Analisi test</button>
+      <button class="main-tab" data-main="generator">Generatore test</button>
+    </nav>
+
+    <section id="analysis-section">
+      <section class="panel upload-panel">
       <h2>Caricamento dati</h2>
       <p>Il CSV deve avere le stesse colonne del primo foglio Excel (timestamp, nome, domande in ordine). Le colonne pari sono positive, le dispari negative.</p>
       <div class="upload-row">
@@ -100,6 +106,35 @@
       </nav>
 
     <section id="view-container" class="view-container"></section>
+    </section>
+    </section>
+
+    <section id="generator-section" class="panel hidden">
+      <h2>Generatore test</h2>
+      <p class="note">Incolla giocatrici e domande per generare lo script App Script del test TeamWeave. Le domande sono automaticamente alternate: la prima positiva, la seconda negativa, e così via. Procedura: 1) Compila i campi. 2) Clicca “Genera script”. 3) In Google Drive crea un nuovo foglio “Apps Script”, incolla lo script e salvalo. 4) Premi “Esegui” per creare il form. 5) Apri il link nel log della console per modificarlo.</p>
+      <div class="form-grid">
+        <label for="tw-form-title">Titolo del form</label>
+        <input id="tw-form-title" type="text" value="Test Sociometrico [Squadra]" />
+        <label for="tw-form-limit">Numero selezioni</label>
+        <input id="tw-form-limit" type="number" value="3" min="1" />
+      </div>
+      <label for="tw-form-players">Giocatrici (una per riga)</label>
+      <textarea id="tw-form-players" class="tall" rows="6" placeholder="Giocatrice 1&#10;Giocatrice 2&#10;Giocatrice 3"></textarea>
+      <label for="tw-form-questions">Domande (una per riga)</label>
+      <textarea id="tw-form-questions" class="tall" rows="6" placeholder="Immagina di andare in trasferta. Chi vorresti in camera con te?&#10;Immagina di andare in trasferta. Chi non vorresti in camera con te?&#10;Immagina di giocare una partita decisiva. Chi vorresti con te in campo?&#10;Chi non vorresti con te in campo in una partita decisiva?"></textarea>
+      <div class="tw-categories">
+        <h3>Categorie per coppia di domande</h3>
+        <p class="note">Ogni coppia (positiva + negativa) condivide la stessa categoria.</p>
+        <div id="tw-form-categories" class="tw-category-list"></div>
+      </div>
+      <div class="upload-row">
+        <button id="tw-form-convert" type="button">Genera script</button>
+        <button id="tw-form-copy" type="button">Copia script</button>
+        <button id="tw-form-download" type="button">Scarica .gs</button>
+        <button id="tw-form-download-questions" type="button">Scarica domande .txt</button>
+      </div>
+      <div class="result pre" id="tw-form-output">function buildTeamWeaveForm() { /* clicca Genera */ }</div>
+      <div class="parsed" id="tw-form-preview"></div>
     </section>
   </main>
 
