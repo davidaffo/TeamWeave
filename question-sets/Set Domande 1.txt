@@ -1,0 +1,34 @@
+[Sociali] Immagina di andare in trasferta. Chi vorresti in camera con te?
+[Sociali] Immagina di andare in trasferta. Chi non vorresti in camera con te?
+[Attitudinali] Chi preferiresti che l'allenatore avesse scelto come capitano della squadra?
+[Attitudinali] Chi non sarebbe adatta a fare il capitano?
+[Tecniche] Immagina di giocare una partita decisiva. Chi vorresti con te in campo?
+[Tecniche] Chi non vorresti con te in campo in una partita decisiva?
+[Tecniche] Sei al tie-break (set dello spareggio). Chi secondo te dovrebbe giocare?
+[Tecniche] Chi non dovrebbe giocare al tie-break?
+[Attitudinali] Durante l'allenamento, in un esercizio a coppie, chi vorresti con te?
+[Attitudinali] Durante l'allenamento, chi non vorresti come compagna in un esercizio a coppie?
+[Attitudinali] Durante l'allenamento, chi secondo te dà sempre il massimo?
+[Attitudinali] Chi secondo te non dà sempre il massimo durante l'allenamento?
+[Tecniche] In un momento decisivo della partita, chi vorresti andasse a battere?
+[Tecniche] In un momento decisivo, chi preferiresti non mandare a battere?
+[Tecniche] Sei l'alzatore, sul 24-23 per la tua squadra. A chi alzi il pallone?
+[Tecniche] Chi non vorresti che attaccasse sul 24-23?
+[Tecniche] In un momento decisivo della partita, chi vorresti in ricezione?
+[Tecniche] In un momento decisivo, chi preferiresti non avere in ricezione?
+[Tecniche] Sul 24-23 per la tua squadra, chi vorresti difendesse il pallone più difficile?
+[Tecniche] Sul 24-23, chi non vorresti si trovasse a difendere il pallone più difficile?
+[Sociali] Se una sera sei sola, con chi ti piacerebbe uscire?
+[Sociali] Con chi non ti andrebbe di uscire una sera?
+[Tecniche] Devi creare una squadra forte per vincere con altre 3 persone. Chi scegli?
+[Tecniche] Chi non sceglieresti per creare una squadra forte?
+[Tecniche] Chi tra le tue compagne può dare il maggior contributo in un momento critico della partita?
+[Tecniche] Chi non pensi possa contribuire in un momento critico della partita?
+[Sociali] Hai un problema e vuoi confrontarti con delle compagne di squadra. Con chi ne parli?
+[Sociali] Con chi non ti confronteresti per parlare di un problema?
+[Attitudinali] La squadra ha dei problemi. Chi potrebbe farsi portavoce presso l’allenatore o i dirigenti?
+[Attitudinali] Chi non sarebbe adatta a farsi portavoce della squadra?
+[Tecniche] Chi sono secondo te le più forti della squadra?
+[Tecniche] Chi sono secondo te le più scarse della squadra?
+[Sociali] Chi sono le compagne più simpatiche?
+[Sociali] Chi sono le compagne più antipatiche?

@@ -10,6 +10,10 @@
   const twFormLimit = document.getElementById("tw-form-limit");
   const twFormPlayers = document.getElementById("tw-form-players");
   const twFormQuestions = document.getElementById("tw-form-questions");
+  const twQuestionSetSelect = document.getElementById("tw-question-set-select");
+  const twQuestionSetLoad = document.getElementById("tw-question-set-load");
+  const twQuestionFileInput = document.getElementById("tw-question-file-input");
+  const twQuestionSetStatus = document.getElementById("tw-question-set-status");
   const twFormCategories = document.getElementById("tw-form-categories");
   const twFormConvert = document.getElementById("tw-form-convert");
   const twFormCopy = document.getElementById("tw-form-copy");
@@ -88,8 +92,13 @@
   let isRestoringDatasets = false;
   const DATASETS_KEY = "teamweave:datasets";
   const DATASET_STATE_KEY = "teamweave:datasetState";
+  const QUESTION_SET_CHOICE_KEY = "teamweave:generatorQuestionSet";
   const VIEW_KEY = "teamweave:lastView";
   const LINK_PARAM = "data";
+  const QUESTION_SETS_DIR = "question-sets/";
+  const DEFAULT_QUESTION_SETS = [
+    { name: "Set Domande 1", url: "question-sets/Set%20Domande%201.txt" }
+  ];
   const PALETTE = {
     posMatrix: ["#ffffff", "#00a933"],
     posTotals: ["#ffffff", "#81d41a"],
@@ -3114,6 +3123,148 @@
     ].join("\n");
   }
 
+  async function initializeDefaultQuestionSets() {
+    populateQuestionSetSelect(DEFAULT_QUESTION_SETS);
+    await discoverQuestionSets();
+    const preferredUrl = getStoredQuestionSetChoice() || DEFAULT_QUESTION_SETS[0]?.url;
+    if (preferredUrl) {
+      await loadQuestionSetFromUrl(preferredUrl, { silent: true, persistChoice: false });
+    }
+  }
+
+  async function discoverQuestionSets() {
+    try {
+      const response = await fetch(QUESTION_SETS_DIR, { cache: "no-store" });
+      if (!response.ok) {
+        return;
+      }
+      const html = await response.text();
+      const discovered = extractQuestionSetLinks(html);
+      if (discovered.length) {
+        populateQuestionSetSelect(discovered);
+      }
+    } catch (error) {
+      return;
+    }
+  }
+
+  function extractQuestionSetLinks(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const baseUrl = new URL(QUESTION_SETS_DIR, location.href);
+    const discovered = Array.from(doc.querySelectorAll("a[href]"))
+      .map((link) => link.getAttribute("href") || "")
+      .filter((href) => href.toLowerCase().endsWith(".txt"))
+      .map((href) => {
+        const url = new URL(href, baseUrl);
+        const fileName = decodeURIComponent(url.pathname.split("/").pop() || href);
+        return {
+          name: fileName.replace(/\.txt$/i, ""),
+          url: `${QUESTION_SETS_DIR}${encodeURIComponent(fileName)}`
+        };
+      });
+    const byUrl = new Map();
+    DEFAULT_QUESTION_SETS.concat(discovered).forEach((set) => {
+      byUrl.set(normalizeQuestionSetUrl(set.url), set);
+    });
+    return Array.from(byUrl.values()).sort((a, b) => a.name.localeCompare(b.name, "it"));
+  }
+
+  function normalizeQuestionSetUrl(url) {
+    try {
+      const parsed = new URL(url, location.href);
+      return decodeURIComponent(parsed.pathname).toLowerCase();
+    } catch (error) {
+      return String(url || "").replace(/%20/g, " ").toLowerCase();
+    }
+  }
+
+  function populateQuestionSetSelect(sets) {
+    if (!twQuestionSetSelect) {
+      return;
+    }
+    const selected = twQuestionSetSelect.value || getStoredQuestionSetChoice() || DEFAULT_QUESTION_SETS[0]?.url || "";
+    twQuestionSetSelect.textContent = "";
+    sets.forEach((set) => {
+      const option = document.createElement("option");
+      option.value = set.url;
+      option.textContent = set.name;
+      twQuestionSetSelect.appendChild(option);
+    });
+    if (sets.some((set) => set.url === selected)) {
+      twQuestionSetSelect.value = selected;
+    } else if (sets[0]) {
+      twQuestionSetSelect.value = sets[0].url;
+    }
+  }
+
+  function getStoredQuestionSetChoice() {
+    try {
+      return localStorage.getItem(QUESTION_SET_CHOICE_KEY);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveQuestionSetChoice(url) {
+    try {
+      localStorage.setItem(QUESTION_SET_CHOICE_KEY, url);
+    } catch (error) {
+      return;
+    }
+  }
+
+  function getQuestionSetName(url) {
+    const option = Array.from(twQuestionSetSelect?.options || []).find((entry) => entry.value === url);
+    if (option) {
+      return option.textContent || url;
+    }
+    const fallback = DEFAULT_QUESTION_SETS.find((entry) => entry.url === url);
+    return fallback?.name || decodeURIComponent(url.split("/").pop() || "Set domande").replace(/\.txt$/i, "");
+  }
+
+  async function loadQuestionSetFromUrl(url, options = {}) {
+    const { silent = false, persistChoice = true } = options;
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("Set domande non trovato.");
+      }
+      const text = await response.text();
+      applyQuestionSetText(text, getQuestionSetName(url));
+      if (persistChoice) {
+        saveQuestionSetChoice(url);
+      }
+      if (!silent) {
+        setGeneratorStatus(`Set domande caricato: ${getQuestionSetName(url)}.`);
+      }
+      return true;
+    } catch (error) {
+      if (!silent) {
+        setGeneratorStatus(error.message || "Impossibile caricare il set domande.", true);
+      }
+      return false;
+    }
+  }
+
+  function applyQuestionSetText(text, name) {
+    const lines = parseList(text);
+    if (!lines.length) {
+      throw new Error("File domande vuoto.");
+    }
+    twFormQuestions.value = lines.join("\n");
+    twFormQuestions.dispatchEvent(new Event("input"));
+    setGeneratorStatus(`${name || "Set domande"}: ${lines.length} domande caricate.`);
+  }
+
+  function setGeneratorStatus(message, isError) {
+    if (!twQuestionSetStatus) {
+      return;
+    }
+    twQuestionSetStatus.textContent = message;
+    twQuestionSetStatus.classList.toggle("error", Boolean(isError));
+  }
+
   function initTeamweaveFormGenerator() {
     if (!twFormTitle || !twFormPlayers || !twFormQuestions) {
       return;
@@ -3256,10 +3407,39 @@
 
     twFormQuestions.addEventListener("input", renderCategorySelectors);
     renderCategorySelectors();
+    initializeDefaultQuestionSets();
 
     twFormConvert?.addEventListener("click", convert);
     twFormCopy?.addEventListener("click", copyScript);
     twFormDownload?.addEventListener("click", downloadScript);
+    twQuestionSetLoad?.addEventListener("click", async () => {
+      const selectedUrl = twQuestionSetSelect?.value;
+      if (!selectedUrl) {
+        setGeneratorStatus("Nessun set domande disponibile.", true);
+        return;
+      }
+      await loadQuestionSetFromUrl(selectedUrl, { silent: false, persistChoice: true });
+    });
+    twQuestionSetSelect?.addEventListener("change", async () => {
+      const selectedUrl = twQuestionSetSelect.value;
+      if (selectedUrl) {
+        await loadQuestionSetFromUrl(selectedUrl, { silent: false, persistChoice: true });
+      }
+    });
+    twQuestionFileInput?.addEventListener("change", async (event) => {
+      const [file] = Array.from(event.target.files || []);
+      if (!file) {
+        return;
+      }
+      try {
+        const text = await readFile(file);
+        applyQuestionSetText(text, file.name);
+      } catch (error) {
+        setGeneratorStatus(error.message || "Impossibile leggere il file domande.", true);
+      } finally {
+        event.target.value = "";
+      }
+    });
     twFormDownloadQuestions?.addEventListener("click", () => {
       const lines = parseList(twFormQuestions.value);
       if (!lines.length) {

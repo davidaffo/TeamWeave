@@ -1,9 +1,10 @@
-const CACHE_NAME = "teamweave-pwa-v2";
+const CACHE_NAME = "teamweave-pwa-v4";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./question-sets/Set%20Domande%201.txt",
   "./manifest.json",
   "./icon.svg"
 ];

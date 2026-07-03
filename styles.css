@@ -598,6 +598,10 @@ button:hover {
   margin-bottom: 1rem;
 }
 
+.note.error {
+  color: #9b2c2c;
+}
+
 .responses-list {
   display: grid;
   gap: 1rem;

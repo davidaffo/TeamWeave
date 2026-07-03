@@ -131,6 +131,20 @@ Procedura da seguire:<br>
       </div>
       <label for="tw-form-players">Giocatrici (una per riga)</label>
       <textarea id="tw-form-players" class="tall" rows="6" placeholder="Giocatrice 1&#10;Giocatrice 2&#10;Giocatrice 3"></textarea>
+      <div class="tw-form-box">
+        <h3>Set domande</h3>
+        <p class="note">Scegli un file TXT dalla cartella <code>question-sets</code> oppure caricane uno manualmente. Il formato e' una domanda per riga con tag categoria, ad esempio <code>[Tecniche] Domanda</code>.</p>
+        <div class="form-grid">
+          <label for="tw-question-set-select">Set predefinito</label>
+          <select id="tw-question-set-select"></select>
+          <label for="tw-question-file-input">Carica TXT</label>
+          <input id="tw-question-file-input" type="file" accept=".txt,text/plain" />
+        </div>
+        <div class="upload-row">
+          <button id="tw-question-set-load" type="button">Usa set domande</button>
+        </div>
+        <p id="tw-question-set-status" class="note">Nessun set domande caricato.</p>
+      </div>
       <label for="tw-form-questions">Domande (una per riga)</label>
       <textarea id="tw-form-questions" class="tall" rows="6" placeholder="Immagina di andare in trasferta. Chi vorresti in camera con te?&#10;Immagina di andare in trasferta. Chi non vorresti in camera con te?&#10;Immagina di giocare una partita decisiva. Chi vorresti con te in campo?&#10;Chi non vorresti con te in campo in una partita decisiva?"></textarea>
       <div class="tw-categories">
