@@ -3119,6 +3119,7 @@
       "• Potete mettere da 0 a " + max + " risposte. Nelle domande positive è importante sforzarsi di mettere " + max + " risposte (a meno che proprio non ci siano).",
       "• Siate oggettive nelle domande puramente tecniche (es. “chi sceglieresti per fare una squadra forte”).",
       "• Nessuno saprà le vostre risposte oltre all’allenatore: siate sincere.",
+      "• Non ha ovviamente senso votare dei non ricevitori su una domanda di ricezione, eccetto rari casi, così come non ha ovviamente senso votare i liberi su domande di battuta o attacco",
       "• Non potete auto-votarvi."
     ].join("\n");
   }
