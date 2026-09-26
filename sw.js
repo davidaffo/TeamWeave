@@ -1,4 +1,4 @@
-const CACHE_NAME = "teamweave-pwa-v13";
+const CACHE_NAME = "teamweave-pwa-v15";
 const ASSETS = [
   "./",
   "./index.html",

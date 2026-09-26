@@ -1108,3 +1108,41 @@ button:hover {
   background: #e4eee8;
   font-weight: 700;
 }
+
+.council-candidates {
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.council-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.65rem;
+}
+
+.council-option {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.council-option:has(input:checked) {
+  background: #e4eee8;
+  border-color: #39816a;
+}
+
+.council-option input {
+  width: auto;
+  flex-shrink: 0;
+}
+
+.council-option small {
+  display: block;
+  margin-top: 0.35rem;
+}

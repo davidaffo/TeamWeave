@@ -2774,7 +2774,7 @@
       || b.covered - a.covered);
   }
 
-  function renderCaptainSection(analysis) {
+  function renderCaptainPairSection(analysis) {
     const section = document.createElement("div");
     section.className = "captain-section";
     const addText = (parent, tag, text, className) => {
@@ -2944,6 +2944,262 @@
       renderDetail();
     });
     renderRanking();
+    return section;
+  }
+
+  function analyzeCouncil(analysis, members) {
+    const unique = [...new Set(members)].filter((index) => Number.isInteger(index) && index >= 0 && index < analysis.names.length);
+    const selected = new Set(unique);
+    const ranks = { Assente: 0, Bassa: 1, Media: 2, Alta: 3 };
+    const matrix = analysis.matrices.leadershipPos;
+    const peers = analysis.names.flatMap((name, index) => selected.has(index) ? [] : [{
+      index,
+      reachedBy: unique.filter((member) => matrix[member][index] > 0 && matrix[index][member] > 0)
+    }]);
+    const attitudes = unique.map((index) => ranks[analysis.classifications[index].byCategory.Attitudinali.inflPos] || 0);
+    const socials = unique.map((index) => ranks[analysis.classifications[index].byCategory.Sociali.inflPos] || 0);
+    return {
+      members: unique, peers,
+      covered: peers.filter((peer) => peer.reachedBy.length > 0).length,
+      totalPeers: peers.length,
+      attitudeFloor: attitudes.length ? Math.min(...attitudes) : 0,
+      socialFloor: socials.length ? Math.min(...socials) : 0,
+      profileSum: [...attitudes, ...socials].reduce((sum, value) => sum + value, 0)
+    };
+  }
+
+  function* councilCandidates(analysis, size, fixedCaptain = null) {
+    const count = analysis.names.length;
+    if (!Number.isInteger(size) || size < 1 || size > count) return;
+    if (fixedCaptain !== null && (!Number.isInteger(fixedCaptain) || fixedCaptain < 0 || fixedCaptain >= count)) return;
+    const pool = analysis.names.map((_, index) => index).filter((index) => index !== fixedCaptain);
+    const selected = fixedCaptain === null ? [] : [fixedCaptain];
+    function* visit(start) {
+      if (selected.length === size) {
+        yield analyzeCouncil(analysis, selected);
+        return;
+      }
+      const remaining = size - selected.length;
+      for (let index = start; index <= pool.length - remaining; index += 1) {
+        selected.push(pool[index]);
+        yield* visit(index + 1);
+        selected.pop();
+      }
+    }
+    yield* visit(0);
+  }
+
+  function renderCouncilSection(analysis) {
+    const section = document.createElement("div");
+    section.className = "council-section";
+    const add = (parent, tag, text, className) => {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      if (className) element.className = className;
+      parent.appendChild(element);
+      return element;
+    };
+    add(section, "h2", "Consiglio della squadra");
+    add(section, "p", "Imposta il numero totale di consiglieri, capitano incluso: vengono confrontate le composizioni complete e selezionata la migliore. Puoi applicare un’alternativa o modificare i vice manualmente. Il profilo attitudinale e sociale resta il primo criterio; la copertura delle altre compagne il secondo. Tecnica e rapporti interni al consiglio non entrano nella valutazione.", "note");
+    if (!analysis.names.length) {
+      add(section, "p", "Non ci sono giocatrici da selezionare.", "note");
+      return section;
+    }
+    const initial = rankCaptainPairs(analyzeCaptainPairs(analysis))[0];
+    let captainIndex = initial?.first ?? 0;
+    const deputies = new Set(initial ? [initial.second] : []);
+    const control = document.createElement("label");
+    control.className = "player-control";
+    control.appendChild(document.createTextNode("Capitano del consiglio"));
+    const captain = document.createElement("select");
+    analysis.names.forEach((name, index) => captain.add(new Option(name, index)));
+    captain.value = String(captainIndex);
+    control.appendChild(captain);
+    section.appendChild(control);
+    const sizeControl = add(section, "label", "Numero totale di consiglieri (capitano incluso)", "player-control");
+    const sizeSelect = document.createElement("select");
+    sizeSelect.className = "council-size";
+    analysis.names.forEach((_, index) => sizeSelect.add(new Option(`${index + 1} — 1 capitano e ${index} vice`, index + 1)));
+    sizeSelect.value = String(Math.min(2, analysis.names.length));
+    sizeControl.appendChild(sizeSelect);
+    const lockLabel = add(section, "label", "", "council-option");
+    const lockCaptain = document.createElement("input");
+    lockCaptain.type = "checkbox";
+    lockCaptain.checked = true;
+    lockLabel.appendChild(lockCaptain);
+    add(lockLabel, "span", "Mantieni il capitano selezionato nei consigli suggeriti");
+    add(section, "p", "Ordine: profilo attitudinale e sociale di tutti i membri, poi copertura. A parità di questi criteri i consigli sono equivalenti. Cambiando numero o capitano viene applicata la migliore composizione completa.", "note");
+    const suggestions = add(section, "div", "", "council-suggestions");
+    suggestions.setAttribute("aria-live", "polite");
+    const fieldset = document.createElement("fieldset");
+    fieldset.className = "council-candidates";
+    add(fieldset, "legend", "Vicecapitani — modifica la composizione suggerita");
+    const candidates = document.createElement("div");
+    candidates.className = "council-options";
+    fieldset.appendChild(candidates);
+    section.appendChild(fieldset);
+    const detail = document.createElement("div");
+    detail.setAttribute("aria-live", "polite");
+    section.appendChild(detail);
+    const render = () => {
+      const members = [captainIndex, ...deputies];
+      const council = analyzeCouncil(analysis, members);
+      candidates.replaceChildren();
+      analysis.names.forEach((name, index) => {
+        const label = document.createElement("label");
+        label.className = "council-option";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = String(index);
+        checkbox.checked = deputies.has(index);
+        checkbox.disabled = index === captainIndex || (!deputies.has(index) && deputies.size >= Number(sizeSelect.value) - 1);
+        label.appendChild(checkbox);
+        const caption = document.createElement("span");
+        add(caption, "strong", `${name}${index === captainIndex ? " · Capitano" : ""}`);
+        const profile = analysis.classifications[index].byCategory;
+        add(caption, "small", `Attitudinale +: ${profile.Attitudinali.inflPos} · Sociale +: ${profile.Sociali.inflPos}`);
+        label.appendChild(caption);
+        candidates.appendChild(label);
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) deputies.add(index);
+          else deputies.delete(index);
+          render();
+          candidates.querySelector(`input[value="${index}"]`)?.focus();
+        });
+      });
+      detail.replaceChildren();
+      add(detail, "h3", `Consiglio selezionato: ${members.length} / ${sizeSelect.value} membri — 1 capitano e ${deputies.size} vice`);
+      const stats = document.createElement("div");
+      stats.className = "player-stats";
+      [
+        ["Minimo attitudinale +", ["Assente", "Bassa", "Media", "Alta"][council.attitudeFloor]],
+        ["Minimo sociale +", ["Assente", "Bassa", "Media", "Alta"][council.socialFloor]],
+        ["Compagne coperte", `${council.covered} / ${council.totalPeers}`],
+        ["Copertura", council.totalPeers ? formatPercent(council.covered / council.totalPeers) : "Non applicabile"]
+      ].forEach(([label, value]) => {
+        const card = document.createElement("div");
+        add(card, "span", label);
+        add(card, "strong", String(value));
+        stats.appendChild(card);
+      });
+      detail.appendChild(stats);
+      add(detail, "p", "Ogni compagna esterna al consiglio conta una sola volta, anche se ha reciproci positivi con più membri. Aggiungendo un vice cambia anche il numero di compagne esterne su cui si calcola la percentuale.", "note");
+      if (!council.totalPeers) add(detail, "p", "Tutte le giocatrici fanno parte del consiglio: non ci sono compagne esterne su cui calcolare la copertura.", "note");
+      add(detail, "h3", "Membri del consiglio");
+      detail.appendChild(renderPlayerTable(
+        ["Giocatrice", "Ruolo", "Influenza attitudinale +", "Influenza sociale +", "Compagne esterne coperte", "Coperte solo da lei"],
+        members.map((index) => [analysis.names[index], index === captainIndex ? "Capitano" : "Vicecapitano", analysis.classifications[index].byCategory.Attitudinali.inflPos, analysis.classifications[index].byCategory.Sociali.inflPos,
+          council.peers.filter((peer) => peer.reachedBy.includes(index)).length,
+          council.peers.filter((peer) => peer.reachedBy.length === 1 && peer.reachedBy[0] === index).length])
+      ));
+      add(detail, "h3", "Copertura della squadra");
+      const groups = [
+        ["Raggiunte da un membro", council.peers.filter((peer) => peer.reachedBy.length === 1), "captain-only"],
+        ["Raggiunte da più membri", council.peers.filter((peer) => peer.reachedBy.length > 1), "captain-shared"],
+        ["Non coperte", council.peers.filter((peer) => !peer.reachedBy.length), "captain-uncovered"]
+      ];
+      const chart = document.createElement("div");
+      chart.className = "captain-coverage";
+      chart.setAttribute("role", "img");
+      chart.setAttribute("aria-label", groups.map(([label, peers]) => `${label}: ${peers.length}`).join("; "));
+      groups.forEach(([label, peers, tone]) => {
+        if (!peers.length) return;
+        const segment = add(chart, "div", String(peers.length), tone);
+        segment.style.flexGrow = peers.length;
+        segment.title = `${label}: ${peers.length}`;
+      });
+      if (council.totalPeers) detail.appendChild(chart);
+      const lists = document.createElement("div");
+      lists.className = "captain-groups";
+      groups.forEach(([label, peers, tone]) => {
+        const group = add(lists, "div", "", tone);
+        add(group, "h4", `${label} (${peers.length})`);
+        add(group, "p", peers.map((peer) => analysis.names[peer.index]).join(", ") || "Nessuna");
+      });
+      detail.appendChild(lists);
+      if (council.totalPeers) detail.appendChild(renderPlayerTable(["Compagna esterna", "Raggiunta da"], council.peers.map((peer) => [analysis.names[peer.index], peer.reachedBy.map((index) => analysis.names[index]).join(", ") || "Nessun membro"])));
+    };
+    let calculationVersion = 0;
+    const suggest = async () => {
+      const version = ++calculationVersion;
+      fieldset.disabled = true;
+      const size = Number(sizeSelect.value);
+      const fixed = lockCaptain.checked ? captainIndex : null;
+      suggestions.replaceChildren();
+      const status = add(suggestions, "p", "Confronto dei consigli in corso…", "note");
+      let best = [], examined = 0, ties = 0;
+      const equalScore = (a, b) => a.attitudeFloor === b.attitudeFloor && a.socialFloor === b.socialFloor && a.profileSum === b.profileSum && a.covered === b.covered;
+      for (const candidate of councilCandidates(analysis, size, fixed)) {
+        const previous = best[0];
+        best = rankCaptainPairs([...best, candidate]).slice(0, 10);
+        if (!previous || !equalScore(previous, best[0])) ties = 1;
+        else if (equalScore(candidate, best[0])) ties += 1;
+        examined += 1;
+        if (examined % 200 === 0) {
+          status.textContent = `Confronto in corso: ${examined} consigli valutati…`;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+          if (version !== calculationVersion) return;
+        }
+      }
+      if (version !== calculationVersion) return;
+      fieldset.disabled = false;
+      if (!best.length) {
+        status.textContent = "Nessun consiglio disponibile con questa composizione.";
+        return;
+      }
+      const apply = (council) => {
+        if (!council.members.includes(captainIndex)) captainIndex = council.members[0];
+        captain.value = String(captainIndex);
+        deputies.clear();
+        council.members.filter((index) => index !== captainIndex).forEach((index) => deputies.add(index));
+        render();
+      };
+      status.textContent = `${examined} consigli completi confrontati, ${ties} a pari merito al primo posto. Mostrati i migliori ${best.length}. ${fixed === null ? "Capitano modificabile tra i membri: il ruolo non cambia la valutazione." : `Capitano mantenuto: ${analysis.names[fixed]}.`}`;
+      add(suggestions, "h3", `Consigli suggeriti: ${size} membri (1 capitano e ${size - 1} vice)`);
+      const table = renderPlayerTable(
+        ["Consiglio", "Minimo attitudinale +", "Minimo sociale +", "Somma livelli +", "Compagne coperte", "Copertura", "Azione"],
+        best.map((council) => [council.members.map((index) => analysis.names[index]).join(", "), ["Assente", "Bassa", "Media", "Alta"][council.attitudeFloor], ["Assente", "Bassa", "Media", "Alta"][council.socialFloor], council.profileSum, `${council.covered} / ${council.totalPeers}`, council.totalPeers ? formatPercent(council.covered / council.totalPeers) : "Non applicabile", ""])
+      );
+      table.classList.add("council-ranking");
+      table.querySelectorAll("tbody tr").forEach((row, index) => {
+        const button = add(row.lastElementChild, "button", "Usa questo consiglio");
+        button.type = "button";
+        button.addEventListener("click", () => apply(best[index]));
+      });
+      suggestions.appendChild(table);
+      apply(best[0]);
+    };
+    sizeSelect.addEventListener("change", () => { suggest(); });
+    lockCaptain.addEventListener("change", () => { suggest(); });
+    captain.addEventListener("change", () => {
+      const next = Number(captain.value);
+      if (deputies.delete(next)) deputies.add(captainIndex);
+      captainIndex = next;
+      suggest();
+    });
+    render();
+    suggest();
+    return section;
+  }
+
+  function renderCaptainSection(analysis) {
+    const section = document.createElement("div");
+    const control = document.createElement("label");
+    control.className = "player-control";
+    control.appendChild(document.createTextNode("Composizione"));
+    const mode = document.createElement("select");
+    mode.add(new Option("Capitano e un vice", "pair"));
+    mode.add(new Option("Consiglio: capitano e più vice", "council"));
+    control.appendChild(mode);
+    const content = document.createElement("div");
+    section.append(control, content);
+    const panels = new Map();
+    const render = () => {
+      if (!panels.has(mode.value)) panels.set(mode.value, mode.value === "council" ? renderCouncilSection(analysis) : renderCaptainPairSection(analysis));
+      content.replaceChildren(panels.get(mode.value));
+    };
+    mode.addEventListener("change", render);
+    render();
     return section;
   }
 
