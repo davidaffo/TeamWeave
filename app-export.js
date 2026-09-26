@@ -717,6 +717,19 @@
     const classifications = summaryRows.map((row) => {
       const inflPos = classifyInfluence(row.positiveReceived.Totali, averages.positiveReceivedTotal);
       const inflNeg = classifyInfluence(row.negativeReceived.Totali, averages.negativeReceivedTotal);
+      const byCategory = Object.fromEntries(CATEGORIES.map((category) => {
+        const positiveAverage = averages[`positiveReceived${category}`];
+        const negativeAverage = averages[`negativeReceived${category}`];
+        const positive = positiveAverage > 0
+          ? classifyInfluence(row.positiveReceived[category], positiveAverage) : "Assente";
+        const negative = negativeAverage > 0
+          ? classifyInfluence(row.negativeReceived[category], negativeAverage) : "Assente";
+        return [category, {
+          inflPos: positive,
+          inflNeg: negative,
+          label: synthesizeCategoryLabel(category, positive, negative)
+        }];
+      }));
       const equilibrio = classifyBalance(
         row.nonRicambiateDate,
         row.nonRicambiateRicevute,
@@ -728,7 +741,8 @@
         inflPos,
         inflNeg,
         equilibrio,
-        label: synthesizeLabel(inflPos, inflNeg, equilibrio)
+        byCategory,
+        label: CATEGORIES.map((category) => byCategory[category].label).join(" · ")
       };
     });
 
@@ -965,6 +979,26 @@
       return "Media";
     }
     return "Bassa";
+  }
+
+  function synthesizeCategoryLabel(category, positive, negative) {
+    const labels = {
+      Tecniche: ["Leader tecnica", "Leader tecnica controversa", "Poco apprezzata tecnicamente", "Apprezzata tecnicamente", "Valutazione tecnica mista", "Poco considerata tecnicamente"],
+      Sociali: ["Benvoluta nel gruppo", "Rapporti contrastanti", "Poco accolta nel gruppo", "Benvoluta nel gruppo", "Rapporti contrastanti", "Poco coinvolta socialmente"],
+      Attitudinali: ["Impegno riconosciuto", "Impegno discusso", "Scarso impegno percepito", "Impegno apprezzato", "Impegno percepito in modo misto", "Impegno poco riconosciuto"]
+    };
+    if (positive === "Assente" && negative === "Assente") {
+      return `${category}: nessuna scelta`;
+    }
+    const options = labels[category];
+    if (positive === "Alta") {
+      return negative === "Alta" ? options[1] : options[0];
+    }
+    if (negative === "Alta") return options[2];
+    if (positive === "Media") {
+      return negative === "Media" ? options[4] : options[3];
+    }
+    return negative === "Media" ? options[4] : options[5];
   }
 
   function classifyBalance(nonRicDate, nonRicRecv, avgDate, avgRecv) {
@@ -2402,11 +2436,20 @@
     classHeading.style.marginTop = "2rem";
     section.appendChild(classHeading);
 
+    const classNote = document.createElement("p");
+    classNote.className = "note";
+    classNote.textContent = "Le influenze per categoria sono confrontate con la rispettiva media di squadra: alta dalla media in su, media da metà media, bassa sotto metà media. Assente indica che non ci sono scelte di quel segno nella categoria. Le etichette descrivono le percezioni espresse nelle risposte; l’ambito attitudinale comprende anche fiducia e leadership, oltre all’impegno.";
+    section.appendChild(classNote);
+
     const classTable = document.createElement("table");
     classTable.className = "matrix-table";
     const classHead = document.createElement("thead");
     const classRow = document.createElement("tr");
-    ["Atleta", "Influenza positiva", "Influenza negativa", "Equilibrio relazionale", "Etichetta sintetica"].forEach((label) => {
+    [
+      "Atleta", "Influenza positiva (Totale)", "Influenza negativa (Totale)",
+      ...CATEGORIES.flatMap((category) => [`Influenza positiva (${category})`, `Influenza negativa (${category})`]),
+      "Equilibrio relazionale", "Etichetta sintetica"
+    ].forEach((label) => {
       const th = document.createElement("th");
       setHeaderText(th, label);
       classRow.appendChild(th);
@@ -2419,26 +2462,28 @@
     const equilibrioRank = { Ignorata: 1, Bilanciata: 2, Selettiva: 3 };
     analysis.classifications.forEach((row) => {
       const tr = document.createElement("tr");
-      [row.name, row.inflPos, row.inflNeg, row.equilibrio, row.label].forEach((value, idx) => {
+      const cells = [
+        { value: row.name },
+        { value: row.inflPos, mode: "positive" },
+        { value: row.inflNeg, mode: "negative" },
+        ...CATEGORIES.flatMap((category) => [
+          { value: row.byCategory[category].inflPos, mode: "positive" },
+          { value: row.byCategory[category].inflNeg, mode: "negative" }
+        ]),
+        { value: row.equilibrio, mode: "balance" },
+        { value: row.label, mode: "label" }
+      ];
+      cells.forEach(({ value, mode }, idx) => {
         const cell = idx === 0 ? document.createElement("th") : document.createElement("td");
         cell.textContent = value;
-        if (idx === 1) {
-          applyLabelFill(cell, value, "positive");
-          if (influenceRank[value]) {
-            cell.dataset.rank = influenceRank[value];
-          }
-        } else if (idx === 2) {
-          applyLabelFill(cell, value, "negative");
-          if (influenceRank[value]) {
-            cell.dataset.rank = influenceRank[value];
-          }
-        } else if (idx === 3) {
+        if (mode === "positive" || mode === "negative") {
+          applyLabelFill(cell, value, mode);
+          cell.dataset.rank = influenceRank[value] || 0;
+        } else if (mode === "balance") {
           applyEquilibrioFill(cell, value);
-          if (equilibrioRank[value]) {
-            cell.dataset.rank = equilibrioRank[value];
-          }
-        } else if (idx === 4) {
-          applyEtichettaFill(cell, value);
+          cell.dataset.rank = equilibrioRank[value] || 0;
+        } else if (mode === "label") {
+          cell.classList.add("classification-label");
         }
         tr.appendChild(cell);
       });
@@ -2447,7 +2492,7 @@
     classTable.appendChild(classBody);
 
     const classWrap = document.createElement("div");
-    classWrap.className = "table-wrap";
+    classWrap.className = "table-wrap classification-wrap";
     classWrap.appendChild(classTable);
     section.appendChild(classWrap);
 
