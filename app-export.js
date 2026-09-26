@@ -81,6 +81,7 @@
     ])
   );
 
+  const playerSelections = new WeakMap();
   const renderers = new Map();
   const datasets = [];
   let currentAnalysis = null;
@@ -602,6 +603,8 @@
     const size = names.length;
     const posMatrix = createMatrix(size, 0);
     const negMatrix = createMatrix(size, 0);
+    const leadershipPos = createMatrix(size, 0);
+    const leadershipNeg = createMatrix(size, 0);
     const receivedPosByCat = initCategoryMap(names, CATEGORIES);
     const receivedNegByCat = initCategoryMap(names, CATEGORIES);
     const posReceivedByQuestion = createRectMatrix(size, posQuestionLabels.length, 0);
@@ -643,6 +646,9 @@
           if (meta.positive) {
             if (chooserIndex !== pickIndex) {
               posMatrix[chooserIndex][pickIndex] += 1;
+              if (meta.category === "Attitudinali" || meta.category === "Sociali") {
+                leadershipPos[chooserIndex][pickIndex] += 1;
+              }
             }
             receivedPosByCat.get(pickKey)[meta.category] += 1;
             const qIndex = posIndexByMeta[idx];
@@ -652,6 +658,9 @@
           } else {
             if (chooserIndex !== pickIndex) {
               negMatrix[chooserIndex][pickIndex] += 1;
+              if (meta.category === "Attitudinali" || meta.category === "Sociali") {
+                leadershipNeg[chooserIndex][pickIndex] += 1;
+              }
             }
             receivedNegByCat.get(pickKey)[meta.category] += 1;
             const qIndex = negIndexByMeta[idx];
@@ -753,6 +762,8 @@
       matrices: {
         posMatrix,
         negMatrix,
+        leadershipPos,
+        leadershipNeg,
         reciprociPos,
         reciprociNeg,
         forzaLegami,
@@ -1580,6 +1591,14 @@
           ));
           appendNetworkForView(analysis, container, view);
         };
+      case "capitano":
+        return (analysis, container) => {
+          container.appendChild(renderCaptainSection(analysis));
+        };
+      case "giocatrice":
+        return (analysis, container) => {
+          container.appendChild(renderPlayerSection(analysis));
+        };
       case "responses":
         return (analysis, container) => {
           container.appendChild(renderResponsesSection(analysis));
@@ -1862,7 +1881,7 @@
       viewContainer.appendChild(panel);
       panels.push(panel);
     });
-    if (panels.length === 2) {
+    if (panels.length === 2 && view !== "giocatrice" && view !== "capitano") {
       highlightDifferences(panels[0], panels[1]);
       syncDualScroll(panels[0], panels[1]);
     }
@@ -2712,6 +2731,469 @@
     if (polarity === "lower") {
       cell.classList.add(isPositive ? "delta-bad" : "delta-good");
     }
+  }
+
+  function analyzeCaptainPairs(analysis) {
+    const positive = buildReciprociMatrix(analysis.matrices.leadershipPos);
+    const influenceRanks = { Assente: 0, Bassa: 1, Media: 2, Alta: 3 };
+    const profiles = analysis.classifications.map((row) => ({
+      attitude: influenceRanks[row.byCategory.Attitudinali.inflPos] || 0,
+      social: influenceRanks[row.byCategory.Sociali.inflPos] || 0
+    }));
+    const pairs = [];
+    for (let first = 0; first < analysis.names.length; first += 1) {
+      for (let second = first + 1; second < analysis.names.length; second += 1) {
+        const onlyFirst = [], onlySecond = [], shared = [], uncovered = [];
+        analysis.names.forEach((name, index) => {
+          if (index === first || index === second) return;
+          const fromFirst = positive[first][index] > 0;
+          const fromSecond = positive[second][index] > 0;
+          if (fromFirst && fromSecond) shared.push(index);
+          else if (fromFirst) onlyFirst.push(index);
+          else if (fromSecond) onlySecond.push(index);
+          else uncovered.push(index);
+        });
+        const covered = onlyFirst.length + onlySecond.length + shared.length;
+        pairs.push({
+          first, second, onlyFirst, onlySecond, shared, uncovered, covered,
+          totalPeers: Math.max(0, analysis.names.length - 2),
+          degreeFirst: onlyFirst.length + shared.length, degreeSecond: onlySecond.length + shared.length,
+          attitudeFloor: Math.min(profiles[first].attitude, profiles[second].attitude),
+          socialFloor: Math.min(profiles[first].social, profiles[second].social),
+          profileSum: profiles[first].attitude + profiles[second].attitude + profiles[first].social + profiles[second].social,
+        });
+      }
+    }
+    return pairs;
+  }
+
+  function rankCaptainPairs(pairs) {
+    return [...pairs].sort((a, b) => b.attitudeFloor - a.attitudeFloor
+      || b.socialFloor - a.socialFloor
+      || b.profileSum - a.profileSum
+      || b.covered - a.covered);
+  }
+
+  function renderCaptainSection(analysis) {
+    const section = document.createElement("div");
+    section.className = "captain-section";
+    const addText = (parent, tag, text, className) => {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      if (className) element.className = className;
+      parent.appendChild(element);
+      return element;
+    };
+    addText(section, "h2", "Capitano e vicecapitano");
+    addText(section, "p", "Prima il profilo positivo attitudinale e sociale di entrambe le candidate, poi la copertura delle compagne attraverso reciproci positivi. Le scelte tecniche sono escluse da questa analisi.", "note");
+    const pairs = analyzeCaptainPairs(analysis);
+    if (!pairs.length) {
+      addText(section, "p", "Servono almeno due giocatrici per confrontare le coppie.", "note");
+      return section;
+    }
+    const controls = document.createElement("div");
+    controls.className = "captain-controls";
+    section.appendChild(controls);
+    const makeSelect = (label, options) => {
+      const control = document.createElement("label");
+      control.className = "player-control";
+      control.appendChild(document.createTextNode(label));
+      const select = document.createElement("select");
+      options.forEach(([value, text]) => select.add(new Option(text, value)));
+      control.appendChild(select);
+      controls.appendChild(control);
+      return select;
+    };
+    const options = analysis.names.map((name, index) => [String(index), name]);
+    const captain = makeSelect("Capitano", options);
+    const deputy = makeSelect("Vicecapitano", options);
+    const best = rankCaptainPairs(pairs)[0];
+    captain.value = String(best.first);
+    deputy.value = String(best.second);
+    const swap = document.createElement("button");
+    swap.type = "button";
+    swap.textContent = "Inverti i ruoli";
+    controls.appendChild(swap);
+    addText(section, "p", "Copertura: altre compagne raggiunte almeno da una candidata, senza duplicati. Si usano solo i reciproci sociali e attitudinali; il rapporto tra capitano e vice non conta nella copertura né come criterio di scelta.", "note");
+    addText(section, "p", "Primo criterio: si confronta il livello positivo attitudinale più basso della coppia, poi quello sociale più basso, infine la somma dei quattro livelli (Assente = 0, Bassa = 1, Media = 2, Alta = 3). Così una candidata forte non compensa un livello debole dell’altra. Secondo criterio, a parità di profilo: copertura senza duplicati. A parità di profilo e copertura le coppie sono equivalenti, senza altri criteri di spareggio. I ruoli restano a tua scelta e non modificano il punteggio.", "note");
+    const recommendation = addText(section, "p", "", "captain-recommendation");
+    const detail = document.createElement("div");
+    section.appendChild(detail);
+    addText(section, "h3", "Classifica delle coppie");
+    const ranking = document.createElement("div");
+    section.appendChild(ranking);
+    const renderDetail = () => {
+      const first = Number(captain.value), second = Number(deputy.value);
+      Array.from(captain.options).forEach((option) => { option.disabled = Number(option.value) === second; });
+      Array.from(deputy.options).forEach((option) => { option.disabled = Number(option.value) === first; });
+      const pair = pairs.find((item) => item.first === Math.min(first, second) && item.second === Math.max(first, second));
+      detail.replaceChildren();
+      if (!pair) return;
+      addText(detail, "h3", `${analysis.names[first]} · ${analysis.names[second]}`);
+      const stats = document.createElement("div");
+      stats.className = "player-stats";
+      [
+        ["Minimo attitudinale +", ["Assente", "Bassa", "Media", "Alta"][pair.attitudeFloor]],
+        ["Minimo sociale +", ["Assente", "Bassa", "Media", "Alta"][pair.socialFloor]],
+        ["Compagne coperte", `${pair.covered} / ${pair.totalPeers}`],
+        ["Copertura", pair.totalPeers ? formatPercent(pair.covered / pair.totalPeers) : "Non applicabile"],
+        ["Compagne in comune", pair.shared.length],
+        ["Compagne non coperte", pair.uncovered.length]
+      ].forEach(([label, value]) => {
+        const card = document.createElement("div");
+        addText(card, "span", label);
+        addText(card, "strong", String(value));
+        stats.appendChild(card);
+      });
+      detail.appendChild(stats);
+      const onlyCaptain = first === pair.first ? pair.onlyFirst : pair.onlySecond;
+      const onlyDeputy = first === pair.first ? pair.onlySecond : pair.onlyFirst;
+      const groups = [
+        [`Solo ${analysis.names[first]}`, onlyCaptain, "captain-only"],
+        [`Entrambe`, pair.shared, "captain-shared"],
+        [`Solo ${analysis.names[second]}`, onlyDeputy, "deputy-only"],
+        ["Non coperte", pair.uncovered, "captain-uncovered"]
+      ];
+      addText(detail, "h4", "Come si distribuisce la copertura");
+      const chart = document.createElement("div");
+      chart.className = "captain-coverage";
+      chart.setAttribute("role", "img");
+      chart.setAttribute("aria-label", groups.map(([label, members]) => `${label}: ${members.length}`).join("; "));
+      groups.forEach(([label, members, className]) => {
+        if (!members.length) return;
+        const segment = document.createElement("div");
+        segment.className = className;
+        segment.style.flexGrow = members.length;
+        segment.title = `${label}: ${members.length}`;
+        segment.textContent = String(members.length);
+        chart.appendChild(segment);
+      });
+      if (pair.totalPeers) detail.appendChild(chart);
+      else addText(detail, "p", "Non ci sono altre compagne su cui calcolare la copertura.", "note");
+      const groupList = document.createElement("div");
+      groupList.className = "captain-groups";
+      groups.forEach(([label, members, className]) => {
+        const card = document.createElement("div");
+        card.className = className;
+        addText(card, "h4", `${label} (${members.length})`);
+        addText(card, "p", members.map((index) => analysis.names[index]).join(", ") || "Nessuna");
+        groupList.appendChild(card);
+      });
+      detail.appendChild(groupList);
+      addText(detail, "h4", "Indicatori per assegnare i ruoli");
+      detail.appendChild(renderPlayerTable(
+        ["Giocatrice", "Ruolo scelto", "Influenza attitudinale +", "Influenza sociale +", "Altre compagne coperte", "Attitudinali ricevute +", "Attitudinali ricevute −", "Sociali ricevute +", "Sociali ricevute −", "Profilo attitudinale"],
+        [first, second].map((index, position) => {
+          const row = analysis.summaryRows[index];
+          return [analysis.names[index], position ? "Vicecapitano" : "Capitano", analysis.classifications[index].byCategory.Attitudinali.inflPos, analysis.classifications[index].byCategory.Sociali.inflPos, index === pair.first ? pair.degreeFirst : pair.degreeSecond, row.positiveReceived.Attitudinali, row.negativeReceived.Attitudinali, row.positiveReceived.Sociali, row.negativeReceived.Sociali, analysis.classifications[index].byCategory.Attitudinali.label];
+        })
+      ));
+      Array.from(ranking.querySelectorAll("tbody tr")).forEach((row) => {
+        const active = row.dataset.pair === `${pair.first}-${pair.second}`;
+        row.classList.toggle("captain-selected", active);
+        row.querySelector("button")?.setAttribute("aria-pressed", String(active));
+      });
+    };
+    const renderRanking = () => {
+      const ordered = rankCaptainPairs(pairs);
+      const top = ordered[0];
+      const tied = ordered.filter((pair) => pair.attitudeFloor === top.attitudeFloor
+        && pair.socialFloor === top.socialFloor && pair.profileSum === top.profileSum && pair.covered === top.covered).length;
+      recommendation.textContent = `${tied === 1 ? "Migliore coppia" : "Una delle migliori coppie"} per profilo attitudinale e sociale, poi copertura: ${analysis.names[top.first]} e ${analysis.names[top.second]}. Copre ${top.covered} su ${top.totalPeers} compagne.`;
+      if (tied > 1) recommendation.textContent += ` ${tied} coppie sono a pari merito.`;
+      if (!ordered.some((pair) => pair.attitudeFloor >= 2 && pair.socialFloor >= 2)) {
+        recommendation.textContent += " Nessuna coppia ha entrambe le influenze positive almeno medie per tutte e due le candidate: verifica i profili prima della scelta.";
+      }
+      if (!ordered.some((pair) => pair.covered > 0)) {
+        recommendation.textContent += " Nessuna coppia copre altre compagne con reciproci sociali o attitudinali: la copertura non distingue le coppie.";
+      }
+      const table = renderPlayerTable(
+        ["Coppia", "Minimo attitudinale +", "Minimo sociale +", "Somma livelli +", "Compagne coperte", "Copertura", "Coperte dalla prima", "Coperte dalla seconda", "In comune", "Dettaglio"],
+        ordered.map((pair) => [
+          `${analysis.names[pair.first]} + ${analysis.names[pair.second]}`,
+          ["Assente", "Bassa", "Media", "Alta"][pair.attitudeFloor],
+          ["Assente", "Bassa", "Media", "Alta"][pair.socialFloor], pair.profileSum,
+          `${pair.covered} / ${pair.totalPeers}`, pair.totalPeers ? formatPercent(pair.covered / pair.totalPeers) : "—",
+          pair.degreeFirst, pair.degreeSecond, pair.shared.length, ""
+        ])
+      );
+      table.classList.add("captain-ranking");
+      table.querySelectorAll("tbody tr").forEach((row, index) => {
+        const pair = ordered[index];
+        row.dataset.pair = `${pair.first}-${pair.second}`;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "Esamina";
+        button.setAttribute("aria-label", `Esamina ${analysis.names[pair.first]} e ${analysis.names[pair.second]}`);
+        button.addEventListener("click", () => {
+          captain.value = String(pair.first);
+          deputy.value = String(pair.second);
+          renderDetail();
+        });
+        row.lastElementChild.appendChild(button);
+      });
+      ranking.replaceChildren(table);
+      renderDetail();
+    };
+    captain.addEventListener("change", renderDetail);
+    deputy.addEventListener("change", renderDetail);
+    swap.addEventListener("click", () => {
+      const previous = captain.value;
+      captain.value = deputy.value;
+      deputy.value = previous;
+      renderDetail();
+    });
+    renderRanking();
+    return section;
+  }
+
+  function getPlayerDetails(analysis, index) {
+    const name = analysis.names[index];
+    const key = normalizeName(name);
+    const nameColumn = findNameColumn(analysis.headers);
+    const givenByCategory = Object.fromEntries(CATEGORIES.map((category) => [category, { positive: 0, negative: 0 }]));
+    const knownNames = new Set(analysis.names.map(normalizeName));
+    const questions = analysis.questionMeta.map((meta, questionIndex) => {
+      const received = [];
+      const given = [];
+      analysis.rows.forEach((row) => {
+        const picks = [...new Set(splitNames(row[nameColumn + 1 + questionIndex] || "").map(normalizeName))];
+        if (picks.includes(key)) received.push(row[nameColumn]);
+        if (normalizeName(row[nameColumn] || "") === key) {
+          given.push(row[nameColumn + 1 + questionIndex] || "Nessuna scelta");
+          if (meta.category) {
+            givenByCategory[meta.category][meta.positive ? "positive" : "negative"] += picks.filter((pick) => pick !== key && knownNames.has(pick)).length;
+          }
+        }
+      });
+      return { ...meta, given: given.join("; ") || "Nessuna risposta", received };
+    });
+    const relationships = analysis.names.flatMap((other, otherIndex) => {
+      if (otherIndex === index) return [];
+      const m = analysis.matrices;
+      return [{
+        name: other,
+        positiveGiven: m.posMatrix[index][otherIndex],
+        positiveReceived: m.posMatrix[otherIndex][index],
+        negativeGiven: m.negMatrix[index][otherIndex],
+        negativeReceived: m.negMatrix[otherIndex][index],
+        reciprocalPositive: m.reciprociPos[index][otherIndex],
+        reciprocalNegative: m.reciprociNeg[index][otherIndex],
+        bond: m.forzaLegami[index][otherIndex],
+        antagonism: m.forzaAntagonismo[index][otherIndex],
+        unreturnedGiven: m.nonRicambiatePos[index][otherIndex],
+        unreturnedReceived: m.nonRicambiatePos[otherIndex][index]
+      }];
+    });
+    return { name, questions, relationships, givenByCategory };
+  }
+
+  function renderPlayerTable(headers, rows) {
+    const wrap = document.createElement("div");
+    wrap.className = "table-wrap player-table-wrap";
+    const table = document.createElement("table");
+    table.className = "matrix-table";
+    const head = table.createTHead().insertRow();
+    headers.forEach((label) => {
+      const cell = document.createElement("th");
+      cell.scope = "col";
+      cell.textContent = label;
+      head.appendChild(cell);
+    });
+    const body = table.createTBody();
+    rows.forEach((values) => {
+      const row = body.insertRow();
+      values.forEach((value, index) => {
+        const cell = document.createElement(index ? "td" : "th");
+        if (!index) cell.scope = "row";
+        cell.textContent = value;
+        row.appendChild(cell);
+      });
+    });
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  function renderPlayerBars(title, rows, series) {
+    const chart = document.createElement("section");
+    chart.className = "player-chart";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    chart.appendChild(heading);
+    const maximum = Math.max(1, ...rows.flatMap((row) => row.values));
+    rows.forEach((row) => {
+      const group = document.createElement("div");
+      group.className = "player-bar-group";
+      const label = document.createElement("strong");
+      label.textContent = row.name;
+      group.appendChild(label);
+      row.values.forEach((value, index) => {
+        const line = document.createElement("div");
+        line.className = "player-bar-line";
+        const caption = document.createElement("span");
+        caption.textContent = series[index].label;
+        const track = document.createElement("div");
+        track.className = "player-bar-track";
+        const bar = document.createElement("div");
+        bar.className = `player-bar ${series[index].tone}`;
+        bar.style.width = `${value / maximum * 100}%`;
+        track.appendChild(bar);
+        track.setAttribute("aria-hidden", "true");
+        const number = document.createElement("strong");
+        number.textContent = formatNumber(value);
+        line.append(caption, track, number);
+        group.appendChild(line);
+      });
+      chart.appendChild(group);
+    });
+    return chart;
+  }
+
+  function renderPlayerNetwork(name, relationships, metric, label) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "player-network";
+    const connections = relationships.filter((row) => row[metric] > 0);
+    if (!connections.length) {
+      const empty = document.createElement("p");
+      empty.className = "note";
+      empty.textContent = "Nessun legame per questo indicatore.";
+      wrapper.appendChild(empty);
+      return wrapper;
+    }
+    const ns = "http://www.w3.org/2000/svg";
+    const svgElement = (tag, attrs, text) => {
+      const el = document.createElementNS(ns, tag);
+      Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+      if (text != null) el.textContent = text;
+      return el;
+    };
+    const height = Math.max(320, connections.length * 52 + 40);
+    const svg = svgElement("svg", { viewBox: `0 0 800 ${height}`, role: "img", "aria-label": `${label}: relazioni di ${name}` });
+    svg.appendChild(svgElement("title", {}, `${label} — ${name}`));
+    const maximum = Math.max(...connections.map((row) => row[metric]));
+    connections.forEach((row, index) => {
+      const y = 40 + index * (height - 80) / Math.max(1, connections.length - 1);
+      const line = svgElement("line", { x1: 220, y1: height / 2, x2: 500, y2: y, stroke: "#688d83", "stroke-width": 1 + row[metric] / maximum * 5 });
+      line.appendChild(svgElement("title", {}, `${row.name}: ${row[metric]}`));
+      svg.appendChild(line);
+      svg.appendChild(svgElement("circle", { cx: 500, cy: y, r: 7, fill: "#688d83" }));
+      svg.appendChild(svgElement("text", { x: 518, y: y + 5, "font-size": 14, fill: "#1c201a" }, `${row.name} (${row[metric]})`));
+    });
+    svg.appendChild(svgElement("circle", { cx: 220, cy: height / 2, r: 12, fill: "#b65a2a" }));
+    svg.appendChild(svgElement("text", { x: 200, y: height / 2 + 5, "text-anchor": "end", "font-size": 14, "font-weight": "bold", fill: "#1c201a" }, name));
+    wrapper.appendChild(svg);
+    return wrapper;
+  }
+
+  function renderPlayerSection(analysis) {
+    const section = document.createElement("div");
+    section.className = "player-section";
+    const heading = document.createElement("h2");
+    heading.textContent = "Scheda giocatrice";
+    section.appendChild(heading);
+    if (!analysis.names.length) return section;
+    const control = document.createElement("label");
+    control.className = "player-control";
+    control.appendChild(document.createTextNode("Giocatrice"));
+    const select = document.createElement("select");
+    analysis.names.forEach((name, index) => select.add(new Option(name, index)));
+    select.value = String(playerSelections.get(analysis) || 0);
+    control.appendChild(select);
+    section.appendChild(control);
+    const content = document.createElement("div");
+    section.appendChild(content);
+    const metrics = [
+      ["positiveReceived", "Scelte positive ricevute"], ["positiveGiven", "Scelte positive date"],
+      ["negativeReceived", "Scelte negative ricevute"], ["negativeGiven", "Scelte negative date"],
+      ["reciprocalPositive", "Reciproci positivi"], ["reciprocalNegative", "Reciproci negativi"],
+      ["bond", "Forza legami"], ["antagonism", "Forza antagonismo"],
+      ["unreturnedGiven", "Positive date e non ricambiate"], ["unreturnedReceived", "Positive ricevute e non ricambiate"]
+    ];
+    let selectedMetric = metrics[0][0];
+    const render = () => {
+      const index = Number(select.value);
+      playerSelections.set(analysis, index);
+      const details = getPlayerDetails(analysis, index);
+      const summary = analysis.summaryRows[index];
+      const classification = analysis.classifications[index];
+      content.replaceChildren();
+      const title = document.createElement("h3");
+      title.textContent = details.name;
+      content.appendChild(title);
+      const labels = document.createElement("p");
+      labels.className = "player-labels";
+      labels.textContent = classification.label;
+      content.appendChild(labels);
+      const cards = document.createElement("div");
+      cards.className = "player-stats";
+      metrics.forEach(([key, label]) => {
+        const card = document.createElement("div");
+        const caption = document.createElement("span");
+        caption.textContent = label;
+        const value = document.createElement("strong");
+        value.textContent = formatNumber(details.relationships.reduce((sum, row) => sum + row[key], 0));
+        card.append(caption, value);
+        cards.appendChild(card);
+      });
+      content.appendChild(cards);
+      const balance = document.createElement("p");
+      balance.textContent = `Equilibrio relazionale: ${classification.equilibrio}`;
+      content.appendChild(balance);
+      content.appendChild(renderPlayerTable(
+        ["Ambito", "Scelte ricevute +", "Scelte ricevute −", "Influenza positiva", "Influenza negativa", "Etichetta"],
+        [
+          ["Totale", summary.positiveReceived.Totali, summary.negativeReceived.Totali, classification.inflPos, classification.inflNeg, classification.label],
+          ...CATEGORIES.map((category) => [category, summary.positiveReceived[category], summary.negativeReceived[category], classification.byCategory[category].inflPos, classification.byCategory[category].inflNeg, classification.byCategory[category].label])
+        ]
+      ));
+      const note = document.createElement("p");
+      note.className = "note";
+      note.textContent = "Le influenze mantengono il confronto con la media dell’intera squadra. I grafici e le relazioni includono solo la giocatrice selezionata. Le etichette descrivono le percezioni espresse nelle risposte.";
+      content.appendChild(note);
+      content.appendChild(renderPlayerBars("Scelte ricevute per categoria", CATEGORIES.map((category) => ({
+        name: category, values: [summary.positiveReceived[category], summary.negativeReceived[category]]
+      })), [{ label: "Positive", tone: "positive" }, { label: "Negative", tone: "negative" }]));
+      content.appendChild(renderPlayerBars("Scelte date per categoria", CATEGORIES.map((category) => ({
+        name: category, values: [details.givenByCategory[category].positive, details.givenByCategory[category].negative]
+      })), [{ label: "Positive", tone: "positive" }, { label: "Negative", tone: "negative" }]));
+      const relationHeading = document.createElement("h3");
+      relationHeading.textContent = "Relazioni con le compagne";
+      content.appendChild(relationHeading);
+      const metricControl = document.createElement("label");
+      metricControl.className = "player-control";
+      metricControl.appendChild(document.createTextNode("Indicatore del grafico e della rete"));
+      const metricSelect = document.createElement("select");
+      metrics.forEach(([key, label]) => metricSelect.add(new Option(label, key)));
+      metricSelect.value = selectedMetric;
+      metricControl.appendChild(metricSelect);
+      content.appendChild(metricControl);
+      const graphs = document.createElement("div");
+      content.appendChild(graphs);
+      const renderGraphs = () => {
+        selectedMetric = metricSelect.value;
+        const label = metrics.find(([key]) => key === selectedMetric)[1];
+        const ordered = [...details.relationships].sort((a, b) => b[selectedMetric] - a[selectedMetric]);
+        graphs.replaceChildren(renderPlayerBars(label, ordered.map((row) => ({ name: row.name, values: [row[selectedMetric]] })), [{ label: "Valore", tone: /negative|Negative|antagonism/.test(selectedMetric) ? "negative" : "positive" }]));
+        const graphNote = document.createElement("p");
+        graphNote.className = "note";
+        graphNote.textContent = `${label}: ogni collegamento riguarda ${details.name}; tra parentesi il valore. La rete esclude i legami tra le altre compagne e quelli con valore zero.`;
+        graphs.append(graphNote, renderPlayerNetwork(details.name, ordered, selectedMetric, label));
+      };
+      metricSelect.addEventListener("change", renderGraphs);
+      renderGraphs();
+      content.appendChild(renderPlayerTable(["Compagna", ...metrics.map(([, label]) => label)], details.relationships.map((row) => [row.name, ...metrics.map(([key]) => row[key])])));
+      const questionHeading = document.createElement("h3");
+      questionHeading.textContent = "Dettaglio per domanda";
+      content.appendChild(questionHeading);
+      const questionNote = document.createElement("p");
+      questionNote.className = "note";
+      questionNote.textContent = "Tutte le risposte date e i nomi di chi ha scelto la giocatrice. Le domande senza categoria sono visibili qui ma, come nelle analisi generali, sono escluse dai conteggi.";
+      content.appendChild(questionNote);
+      content.appendChild(renderPlayerTable(["Domanda", "Categoria", "Segno", "Scelte date", "Scelte ricevute da", "Numero ricevute"], details.questions.map((question) => [question.question, question.category || "Non classificata", question.positive ? "+" : "−", question.given, question.received.join(", ") || "Nessuna scelta", question.received.length])));
+    };
+    select.addEventListener("change", render);
+    render();
+    return section;
   }
 
   function renderResponsesSection(analysis) {
