@@ -603,6 +603,7 @@
     const size = names.length;
     const posMatrix = createMatrix(size, 0);
     const negMatrix = createMatrix(size, 0);
+    const positiveByCategory = Object.fromEntries(CATEGORIES.map(category => [category, createMatrix(size, 0)]));
     const leadershipPos = createMatrix(size, 0);
     const leadershipNeg = createMatrix(size, 0);
     const receivedPosByCat = initCategoryMap(names, CATEGORIES);
@@ -646,6 +647,7 @@
           if (meta.positive) {
             if (chooserIndex !== pickIndex) {
               posMatrix[chooserIndex][pickIndex] += 1;
+              positiveByCategory[meta.category][chooserIndex][pickIndex] += 1;
               if (meta.category === "Attitudinali" || meta.category === "Sociali") {
                 leadershipPos[chooserIndex][pickIndex] += 1;
               }
@@ -761,6 +763,7 @@
       names,
       matrices: {
         posMatrix,
+        positiveByCategory,
         negMatrix,
         leadershipPos,
         leadershipNeg,
@@ -1100,14 +1103,294 @@
     return "Invisibile";
   }
 
+  // Binary directed ties: repeated nominations across questions count once.
+  // Density of mutual dyads and arc reciprocity have different denominators.
+  // Gest et al. (2011), doi:10.1007/s11121-011-0229-2.
+  function computeRelationMetrics(matrix) {
+    const n = matrix.length;
+    let directedTies = 0;
+    let mutualPairs = 0;
+    for (let i = 0; i < n; i += 1) {
+      for (let j = 0; j < n; j += 1) {
+        if (i !== j && matrix[i][j] > 0) directedTies += 1;
+        if (i < j && matrix[i][j] > 0 && matrix[j][i] > 0) mutualPairs += 1;
+      }
+    }
+    const possiblePairs = n * (n - 1) / 2;
+    return {
+      directedTies,
+      mutualPairs,
+      possiblePairs,
+      mutualDensity: possiblePairs ? mutualPairs / possiblePairs : null,
+      reciprocity: directedTies ? 2 * mutualPairs / directedTies : null
+    };
+  }
+
+  function graphComponents(adjacency) {
+    const seen = new Set();
+    const groups = [];
+    adjacency.forEach((_, start) => {
+      if (seen.has(start)) return;
+      const group = [start];
+      seen.add(start);
+      for (let cursor = 0; cursor < group.length; cursor += 1) {
+        adjacency[group[cursor]].forEach((next) => {
+          if (!seen.has(next)) { seen.add(next); group.push(next); }
+        });
+      }
+      groups.push(group.sort((a, b) => a - b));
+    });
+    return groups;
+  }
+
+  // Girvan–Newman: recompute unweighted edge betweenness after each removal,
+  // choose the partition with maximum modularity on the ORIGINAL graph.
+  function detectTeamCommunities(adjacency) {
+    const degrees = adjacency.map(neighbors => neighbors.size);
+    const edgeCount = degrees.reduce((a, b) => a + b, 0) / 2;
+    let best = graphComponents(adjacency);
+    if (!edgeCount) return best;
+    const modularity = (groups) => groups.reduce((score, group) => {
+      const members = new Set(group);
+      const degreeSum = group.reduce((sum, i) => sum + degrees[i], 0);
+      const internal = group.reduce((sum, i) => sum + [...adjacency[i]].filter(j => members.has(j)).length, 0) / 2;
+      return score + internal / edgeCount - (degreeSum / (2 * edgeCount)) ** 2;
+    }, 0);
+    let bestScore = modularity(best);
+    const working = adjacency.map(neighbors => new Set(neighbors));
+    for (let removed = 0; removed < edgeCount; removed += 1) {
+      const scores = new Map();
+      working.forEach((_, source) => {
+        const predecessors = working.map(() => []);
+        const distance = working.map(() => -1);
+        const paths = working.map(() => 0);
+        const dependency = working.map(() => 0);
+        const queue = [source];
+        distance[source] = 0;
+        paths[source] = 1;
+        for (let cursor = 0; cursor < queue.length; cursor += 1) {
+          const v = queue[cursor];
+          working[v].forEach(w => {
+            if (distance[w] < 0) { distance[w] = distance[v] + 1; queue.push(w); }
+            if (distance[w] === distance[v] + 1) { paths[w] += paths[v]; predecessors[w].push(v); }
+          });
+        }
+        for (let cursor = queue.length - 1; cursor >= 0; cursor -= 1) {
+          const w = queue[cursor];
+          predecessors[w].forEach(v => {
+            const contribution = paths[v] / paths[w] * (1 + dependency[w]);
+            const key = `${Math.min(v, w)},${Math.max(v, w)}`;
+            scores.set(key, (scores.get(key) || 0) + contribution);
+            dependency[v] += contribution;
+          });
+        }
+      });
+      // Stable index order resolves equal scores; ties can yield other valid partitions.
+      let chosen = null;
+      let maximum = -1;
+      working.forEach((neighbors, i) => [...neighbors].sort((a, b) => a - b).forEach(j => {
+        if (i < j && scores.get(`${i},${j}`) > maximum + 1e-10) {
+          maximum = scores.get(`${i},${j}`); chosen = [i, j];
+        }
+      }));
+      if (!chosen) break;
+      working[chosen[0]].delete(chosen[1]);
+      working[chosen[1]].delete(chosen[0]);
+      const groups = graphComponents(working);
+      const score = modularity(groups);
+      if (score > bestScore + 1e-10) { bestScore = score; best = groups; }
+    }
+    return best;
+  }
+
+  function computeTeamStructure(matrix) {
+    const adjacency = matrix.map(() => new Set());
+    matrix.forEach((row, i) => row.forEach((value, j) => {
+      if (i !== j && value > 0 && matrix[j][i] > 0) adjacency[i].add(j);
+    }));
+    const components = graphComponents(adjacency);
+    const isolated = adjacency.flatMap((neighbors, i) => neighbors.size ? [] : [i]);
+    const communities = detectTeamCommunities(adjacency).filter(group => group.some(i => adjacency[i].size));
+    let diameter = matrix.length > 1 && components.length === 1 ? 0 : null;
+    if (diameter !== null) {
+      adjacency.forEach((_, source) => {
+        const distances = adjacency.map(() => -1);
+        const queue = [source];
+        distances[source] = 0;
+        for (let cursor = 0; cursor < queue.length; cursor += 1) {
+          const v = queue[cursor];
+          adjacency[v].forEach(w => {
+            if (distances[w] < 0) { distances[w] = distances[v] + 1; queue.push(w); }
+          });
+        }
+        diameter = Math.max(diameter, ...distances);
+      });
+    }
+    return { components, isolated, communities, diameter,
+      largest: Math.max(0, ...components.map(group => group.length)),
+      reciprocal: matrix.map((row, i) => row.map((_, j) => adjacency[i].has(j) ? 1 : 0)) };
+  }
+
+  function describeTeamStructure(structure, names) {
+    const n = names.length;
+    if (n < 2) return {
+      tone: 'neutral', title: 'Dati insufficienti per leggere il gruppo',
+      explanation: 'Servono almeno due giocatrici nel CSV per osservare le relazioni.',
+      next: 'Verifica che siano state raccolte e importate le risposte della squadra.'
+    };
+    if (structure.isolated.length === n) return {
+      tone: 'attention', title: 'Non emergono scelte positive ricambiate',
+      explanation: 'In questa vista nessuna coppia si sceglie in entrambe le direzioni. Le eventuali scelte a senso unico non compaiono in questo grafo.',
+      next: 'Controlla le risposte e le scelte non ricambiate prima di interpretare il risultato: assenza di reciprocità osservata non significa assenza di rapporti.'
+    };
+    if (structure.components.length === 1) return {
+      tone: 'connected', title: 'Tutte le giocatrici sono collegate: un segnale positivo',
+      explanation: `Tutte le ${n} giocatrici fanno parte della stessa rete di scelte ricambiate, direttamente o attraverso altre compagne. Nessuna resta senza un collegamento reciproco.`,
+      next: structure.communities.length > 1
+        ? 'Ci sono sottogruppi, ma restano collegati tra loro: la loro presenza, da sola, non indica un problema. Esamina anche chi tiene in contatto i sottogruppi.'
+        : 'La rete comprende tutte. Per capire come sta la squadra, considera anche le scelte negative e il contesto delle risposte.'
+    };
+    const linkedGroups = structure.components.filter(group => group.length > 1);
+    const isolatedNames = structure.isolated.map(index => names[index]).join(', ');
+    return {
+      tone: 'attention',
+      title: linkedGroups.length > 1 ? 'Emergono gruppi senza collegamenti reciproci tra loro' : 'I legami ricambiati non coinvolgono tutte',
+      explanation: [
+        linkedGroups.length > 1 ? `Ci sono ${linkedGroups.length} gruppi collegati al proprio interno, ma separati dagli altri nel grafo. Il più grande comprende ${structure.largest} giocatrici su ${n}.` : `La rete principale comprende ${structure.largest} giocatrici su ${n}.`,
+        isolatedNames ? `Senza scelte ricambiate in questa vista: ${isolatedNames}.` : 'Ogni giocatrice ha almeno una scelta ricambiata, ma non c’è un percorso che unisca tutta la squadra.'
+      ].join(' '),
+      next: 'Da approfondire: quali rapporti collegano questi gruppi nella vita di squadra? Confronta il grafo con le risposte individuali e con ciò che osservi in allenamento; non etichettare le giocatrici come escluse.'
+    };
+  }
+
+  function renderTeamSummary(analysis, category = 'Totale', container) {
+    const summaryEl = container;
+    summaryEl.replaceChildren();
+    const header = document.createElement('div');
+    header.className = 'team-summary-header';
+    const heading = document.createElement('h2');
+    heading.textContent = 'Coesione: relazioni nella squadra';
+    const datasetName = document.createElement('p');
+    datasetName.className = 'note';
+    datasetName.textContent = `${datasets.find(dataset => dataset.analysis === analysis)?.name || 'Rilevazione corrente'} · ${analysis.names.length} atlete presenti nel CSV · scelte positive reciproche`;
+    const filters = document.createElement('div');
+    filters.className = 'team-category-filters';
+    filters.setAttribute('role', 'group');
+    filters.setAttribute('aria-label', 'Relazioni da analizzare');
+    ['Totale', 'Sociali', 'Tecniche', 'Attitudinali'].forEach(value => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = value;
+      button.setAttribute('aria-pressed', String(value === category));
+      button.addEventListener('click', () => renderTeamSummary(analysis, value, container));
+      filters.appendChild(button);
+    });
+    const scope = document.createElement('p');
+    scope.className = 'note';
+    scope.textContent = category === 'Totale'
+      ? 'Totale: unisce le scelte sociali, tecniche e attitudinali. Due giocatrici possono ricambiarsi anche in categorie diverse.'
+      : `${category}: considera solo le scelte di questa categoria, per distinguere i diversi contesti delle relazioni.`;
+    header.append(heading, datasetName, filters, scope);
+    summaryEl.appendChild(header);
+    const questionCount = analysis.questionMeta.filter(meta => meta.positive && CATEGORIES.includes(meta.category) && (category === 'Totale' || meta.category === category)).length;
+    if (!questionCount) {
+      const empty = document.createElement('p');
+      empty.className = 'team-summary-wide note';
+      empty.textContent = `Nessuna domanda positiva riconosciuta nella categoria ${category}. Indicatori non disponibili: scegli un’altra categoria.`;
+      summaryEl.appendChild(empty);
+      return;
+    }
+    const matrix = category === 'Totale' ? analysis.matrices.posMatrix : analysis.matrices.positiveByCategory[category];
+    const structure = computeTeamStructure(matrix);
+    const n = analysis.names.length;
+    const reading = describeTeamStructure(structure, analysis.names);
+    const overview = document.createElement('section');
+    overview.className = `team-reading team-reading-${reading.tone}`;
+    const readingTitle = document.createElement('h3'); readingTitle.textContent = reading.title;
+    const explanation = document.createElement('p'); explanation.textContent = reading.explanation;
+    const next = document.createElement('p'); next.textContent = reading.next;
+    const limit = document.createElement('p'); limit.className = 'note';
+    limit.textContent = 'Questa lettura riguarda i collegamenti osservati nel questionario: non è un giudizio complessivo sul benessere o sul funzionamento della squadra.';
+    overview.append(readingTitle, explanation, next, limit);
+    summaryEl.appendChild(overview);
+    const graphDetails = document.createElement('section');
+    graphDetails.className = 'team-summary-wide team-graph';
+    const graphTitle = document.createElement('h3');
+    graphTitle.textContent = 'Comunità e collegamenti';
+    graphDetails.appendChild(graphTitle);
+    let canvas = null;
+    const colors = ['#4477aa', '#ee9944', '#228866', '#aa3377', '#8877bb', '#66aacc', '#aa7744', '#999933'];
+    const memberships = analysis.names.map(() => null);
+    structure.communities.forEach((group, index) => group.forEach(i => { memberships[i] = index; }));
+    const showGraph = () => {
+      if (canvas) return;
+      const network = renderNetworkSection({
+        title: category === 'Totale' ? 'Relazioni complessive' : `Relazioni ${category.toLowerCase()}`,
+        note: 'Colori = comunità, grigio = nessun legame reciproco osservato. Dimensione = numero di collegamenti. Il filtro di forza modifica solo il grafo; gli indicatori descrivono la rete completa della vista selezionata.',
+        names: analysis.names, matrix: structure.reciprocal, strengthMatrix: buildForzaMatrix(matrix),
+        nodePalette: PALETTE.network, edgePalette: ['#aebcc5', '#334e68'], toggleId: undefined,
+        nodeColors: memberships.map(group => group === null ? '#b8bec5' : colors[group % colors.length]),
+        nodeGroups: memberships
+      });
+      network.querySelector('.network-legend .legend-row').remove();
+      graphDetails.appendChild(network);
+      canvas = network.querySelector('canvas');
+    };
+    const focusPlayer = index => {
+      showGraph();
+      canvas._networkState.selectedIndex = index;
+      canvas._networkState.onSelectionChange();
+      graphDetails.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+    const card = (title, value, note) => {
+      const el = document.createElement('div');
+      el.className = 'summary-card';
+      const titleEl = document.createElement('span'); titleEl.className = 'label'; titleEl.textContent = title;
+      const valueEl = document.createElement('strong'); valueEl.textContent = value;
+      const noteEl = document.createElement('small'); noteEl.textContent = note;
+      el.append(titleEl, valueEl, noteEl); summaryEl.appendChild(el); return el;
+    };
+    card('Sottogruppi rilevati', String(structure.communities.length), 'Sottogruppi individuati nei legami. Le giocatrici senza legami sono conteggiate separatamente.');
+    card('Distanza tra compagne', n < 2 ? 'Non applicabile' : structure.diameter === null ? 'Rete disconnessa' : `${structure.diameter} passaggi`,
+      structure.diameter === null ? `${structure.components.length} componenti separate: non tutte le giocatrici sono raggiungibili tra loro.` : 'Massimo dei percorsi più brevi tra due giocatrici.');
+    card('Rete principale', `${structure.largest} su ${n}`, 'Giocatrici raggiungibili nella stessa rete, anche attraverso altre compagne.');
+    const isolatedCard = card('Senza scelte ricambiate', String(structure.isolated.length), 'Nella vista selezionata; non equivale a essere escluse dalla squadra.');
+    const playerButton = index => {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'team-player-link';
+      button.textContent = analysis.names[index]; button.addEventListener('click', () => focusPlayer(index)); return button;
+    };
+    if (structure.isolated.length) {
+      const names = document.createElement('div');
+      structure.isolated.forEach(index => names.appendChild(playerButton(index)));
+      isolatedCard.appendChild(names);
+    }
+    const legend = document.createElement('div'); legend.className = 'team-community-legend';
+    structure.communities.forEach((group, index) => {
+      const entry = document.createElement('div');
+      const title = document.createElement('strong'); title.textContent = `C${index + 1} · ${group.length} atlete`;
+      title.style.borderLeft = `6px solid ${colors[index % colors.length]}`;
+      title.style.paddingLeft = '.5rem'; entry.appendChild(title);
+      group.forEach(i => entry.appendChild(playerButton(i))); legend.appendChild(entry);
+    });
+    graphDetails.appendChild(legend);
+    summaryEl.appendChild(graphDetails);
+    showGraph();
+    const metrics = computeRelationMetrics(matrix);
+    const method = document.createElement('section'); method.className = 'summary-method';
+    method.innerHTML = `<h3>Indicatori di dettaglio · metodo e fonti</h3>
+      <p>Densità dei legami reciproci: <strong>${metrics.mutualDensity === null ? 'Non applicabile' : formatPercent(metrics.mutualDensity)}</strong> (${metrics.mutualPairs} coppie / ${metrics.possiblePairs} possibili). Reciprocità: <strong>${metrics.reciprocity === null ? 'Non applicabile' : formatPercent(metrics.reciprocity)}</strong> (${2 * metrics.mutualPairs} legami diretti ricambiati / ${metrics.directedTies} osservati).</p>
+      <p>La rete usa ${questionCount} domande positive ${category === 'Totale' ? 'di tutte le categorie riconosciute' : 'della categoria selezionata'}. Basta una scelta in entrambe le direzioni, anche in domande diverse${category === 'Totale' ? ' e in categorie diverse' : ' della stessa categoria'}. I legami sono binari per questi indicatori; la forza nel grafo considera le ripetizioni.</p>
+      <p>Le comunità sono individuate con Girvan–Newman: rimozione progressiva dei legami con maggiore edge betweenness, ricalcolata a ogni passo, e scelta della partizione con modularità massima. A parità di risultato viene conservata la prima partizione; i pareggi tra legami seguono l’ordine delle atlete nel CSV. Le comunità sono esplorative, non gruppi certi. Le componenti sono invece parti senza alcun collegamento reciproco tra loro, incluse le singole giocatrici senza legami. Queste ultime sono escluse dal conteggio delle comunità e mostrate a parte.</p>
+      <p>Diametro e comunità si ispirano a <a href="https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0194656" target="_blank" rel="noopener noreferrer">van den Bos et al. (2018)</a>, studio su classi scolastiche. Algoritmo: <a href="https://doi.org/10.1103/PhysRevE.69.026113" target="_blank" rel="noopener noreferrer">Newman e Girvan (2004)</a>. Componente più grande e conteggio senza legami sono riepiloghi descrittivi complementari, non scale validate di coesione sportiva. Definizione della reciprocità: <a href="https://doi.org/10.1007/s11121-011-0229-2" target="_blank" rel="noopener noreferrer">Gest et al. (2011)</a>.</p>
+      <p>Nessun voto unico o fascia bassa/media/alta. Numero di atlete, domande e limiti alle nomine condizionano gli indicatori (<a href="https://www.sciencedirect.com/science/article/pii/S0378873308000257" target="_blank" rel="noopener noreferrer">Faust, 2008</a>). Il CSV include solo le atlete riconosciute: risposte mancanti non sono prove di assenza di relazioni. I confronti richiedono condizioni di raccolta comparabili.</p>`;
+    summaryEl.appendChild(method);
+  }
+
   function updateSummary(analysis) {
-    document.getElementById("summary-athletes").textContent = analysis.names.length;
-    document.getElementById("summary-reciproci-pos").textContent = formatPercent(
-      computeReciprocityIndex(analysis.matrices.reciprociPos)
-    );
-    document.getElementById("summary-reciproci-neg").textContent = formatPercent(
-      computeReciprocityIndex(analysis.matrices.reciprociNeg)
-    );
+    summaryEl.replaceChildren();
+    const count = document.createElement("span");
+    count.textContent = `${analysis.names.length} atlete · ${analysis.rows.length} risposte`;
+    summaryEl.appendChild(count);
 
     const warnings = [];
     if (analysis.warnings.unknownSelections.length) {
@@ -1572,6 +1855,13 @@
 
   function createRenderer(view) {
     switch (view) {
+      case "coesione":
+        return (analysis, container) => {
+          const dashboard = document.createElement("div");
+          dashboard.className = "team-dashboard";
+          container.appendChild(dashboard);
+          renderTeamSummary(analysis, "Totale", dashboard);
+        };
       case "matrix-pos":
         return (analysis, container) => {
           container.appendChild(renderMatrixSection(
@@ -4300,7 +4590,7 @@
     return data;
   }
 
-  function renderNetworkSection({ title, note, names, matrix, strengthMatrix, nodePalette, edgePalette, toggleId }) {
+  function renderNetworkSection({ title, note, names, matrix, strengthMatrix, nodePalette, edgePalette, toggleId, nodeColors, nodeGroups }) {
     const section = document.createElement("div");
     const heading = document.createElement("h2");
     heading.textContent = title;
@@ -4320,7 +4610,7 @@
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
     toggle.checked = true;
-    toggle.id = toggleId;
+    if (toggleId) toggle.id = toggleId;
     const text = document.createElement("span");
     text.textContent = "Colora i legami in base alla forza";
     label.appendChild(toggle);
@@ -4358,10 +4648,65 @@
       toggle,
       {
         nodePalette,
-        edgePalette
+        edgePalette,
+        nodeColors,
+        nodeGroups
       }
     );
 
+    const state = canvas._networkState;
+    const playerLabel = document.createElement("label");
+    playerLabel.textContent = "Giocatrice ";
+    const playerSelect = document.createElement("select");
+    playerSelect.add(new Option("Tutta la squadra", ""));
+    names.forEach((name, index) => playerSelect.add(new Option(name, String(index))));
+    playerLabel.appendChild(playerSelect);
+    const filterLabel = document.createElement("label");
+    filterLabel.textContent = "Forza minima dei legami ";
+    const filter = document.createElement("input");
+    filter.type = "range";
+    filter.min = "0";
+    filter.max = String(Math.max(0, state.strengthRange.max));
+    filter.step = "any";
+    filter.value = "0";
+    const output = document.createElement("output");
+    filterLabel.append(filter, output);
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = "Ripristina vista";
+    controls.className = "network-controls";
+    controls.append(playerLabel, filterLabel, reset);
+    const details = document.createElement("p");
+    details.className = "note network-details";
+    details.setAttribute("aria-live", "polite");
+    section.appendChild(details);
+    canvas.setAttribute("aria-label", "Grafo delle relazioni. Usa l’elenco Giocatrice per selezionare anche da tastiera.");
+    state.onSelectionChange = () => {
+      playerSelect.value = state.selectedIndex === null ? "" : String(state.selectedIndex);
+      output.textContent = formatNumber(state.minStrength);
+      const visible = state.edges.filter((_, index) => state.strengths[index] >= state.minStrength);
+      const links = visible.filter(([a, b]) => a === state.selectedIndex || b === state.selectedIndex);
+      details.textContent = state.selectedIndex === null
+        ? `${visible.length} di ${state.edges.length} legami visibili. Clicca una giocatrice per evidenziare i suoi collegamenti; trascinala per spostarla.`
+        : `${names[state.selectedIndex]} · ${links.length} collegamenti visibili: ${links.map(([a, b]) => names[a === state.selectedIndex ? b : a]).join(", ") || "nessuno"}. Clicca sullo sfondo per tornare alla squadra.`;
+      drawNetwork(canvas.getContext("2d"), state);
+    };
+    playerSelect.addEventListener("change", () => {
+      state.selectedIndex = playerSelect.value === "" ? null : Number(playerSelect.value);
+      state.onSelectionChange();
+    });
+    filter.addEventListener("input", () => {
+      state.minStrength = Number(filter.value);
+      state.onSelectionChange();
+    });
+    reset.addEventListener("click", () => {
+      state.selectedIndex = null;
+      state.minStrength = 0;
+      filter.value = "0";
+      layoutGraph(state.nodes, state.edges, state.width, state.height);
+      state.onSelectionChange();
+    });
+    state.onSelectionChange();
     return section;
   }
 
@@ -4375,6 +4720,25 @@
     drawNetwork(ctx, state);
     attachNetworkHandlers(canvas);
     attachNetworkToggle(canvas, toggleEl);
+    // Match the drawing surface to the displayed size. CSS resizing alone
+    // stretches circles or shrinks names, especially in comparisons and on phones.
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(entries => {
+        if (!canvas.isConnected) { observer.disconnect(); return; }
+        const { width: nextWidth, height: nextHeight } = entries[0].contentRect;
+        if (nextWidth <= 0 || nextHeight <= 0) return;
+        const ratio = window.devicePixelRatio || 1;
+        const sizeChanged = Math.abs(state.width - nextWidth) > 1 || Math.abs(state.height - nextHeight) > 1;
+        state.width = nextWidth;
+        state.height = nextHeight;
+        if (sizeChanged) layoutGraph(state.nodes, state.edges, nextWidth, nextHeight);
+        canvas.width = Math.round(nextWidth * ratio);
+        canvas.height = Math.round(nextHeight * ratio);
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        drawNetwork(ctx, state);
+      });
+      observer.observe(canvas);
+    }
   }
 
   function getNetworkLegendStats(names, matrix, strengthMatrix) {
@@ -4429,7 +4793,11 @@
       width,
       height,
       dragIndex: null,
+      selectedIndex: null,
+      minStrength: 0,
       showStrength: true,
+      nodeColors: config?.nodeColors,
+      nodeGroups: config?.nodeGroups,
       nodePalette: config?.nodePalette || PALETTE.network,
       edgePalette: config?.edgePalette || ["#d5d8dc", "#1a9850"]
     };
@@ -4440,7 +4808,18 @@
     ctx.clearRect(0, 0, width, height);
     ctx.lineWidth = 1.2;
 
+    const neighbors = new Set([state.selectedIndex]);
     edges.forEach(([i, j], idx) => {
+      if (strengths[idx] >= state.minStrength && (i === state.selectedIndex || j === state.selectedIndex)) {
+        neighbors.add(i);
+        neighbors.add(j);
+      }
+    });
+    edges.forEach(([i, j], idx) => {
+      if (strengths[idx] < state.minStrength) return;
+      const focused = state.selectedIndex === null || i === state.selectedIndex || j === state.selectedIndex;
+      ctx.globalAlpha = focused ? 1 : 0.08;
+      ctx.lineWidth = state.selectedIndex !== null && focused ? 3 : 1.2;
       if (showStrength) {
         const value = strengths[idx] || 0;
         const t = strengthRange.min === strengthRange.max ? 0 : (value - strengthRange.min) / (strengthRange.max - strengthRange.min);
@@ -4455,15 +4834,18 @@
     });
 
     nodes.forEach((node, idx) => {
+      const focused = state.selectedIndex === null || neighbors.has(idx);
+      ctx.globalAlpha = focused ? 1 : 0.18;
+      ctx.filter = focused ? "none" : "blur(2px)";
       const weight = nodeWeights[idx] || 0;
       const radius = 8 + (weight / maxWeight) * 16;
       const t = maxWeight === 0 ? 0 : weight / maxWeight;
-      const color = interpolateTri(nodePalette, t);
+      const color = state.nodeColors?.[idx] || interpolateTri(nodePalette, t);
 
       ctx.beginPath();
       ctx.fillStyle = color;
       ctx.strokeStyle = "#111";
-      ctx.lineWidth = 1.2;
+      ctx.lineWidth = idx === state.selectedIndex ? 4 : 1.2;
       ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
@@ -4471,8 +4853,12 @@
       ctx.fillStyle = "#1c201a";
       ctx.font = "12px Trebuchet MS";
       ctx.textAlign = "center";
-      ctx.fillText(node.name, node.x, node.y - radius - 6);
+      const group = state.nodeGroups?.[idx];
+      const label = group == null ? node.name : `${node.name} · C${group + 1}`;
+      ctx.fillText(label, node.x, node.y - radius - 6);
     });
+    ctx.globalAlpha = 1;
+    ctx.filter = "none";
   }
 
   function attachNetworkHandlers(canvas) {
@@ -4486,16 +4872,16 @@
     const getPointer = (event) => {
       const rect = canvas.getBoundingClientRect();
       return {
-        x: ((event.clientX - rect.left) / rect.width) * canvas.width,
-        y: ((event.clientY - rect.top) / rect.height) * canvas.height
+        x: ((event.clientX - rect.left) / rect.width) * state.width,
+        y: ((event.clientY - rect.top) / rect.height) * state.height
       };
     };
 
     const findNodeAt = (x, y) => {
       for (let i = state.nodes.length - 1; i >= 0; i -= 1) {
         const node = state.nodes[i];
-        const degree = state.degrees[i];
-        const radius = 8 + (degree / state.maxDegree) * 16;
+        const degree = state.nodeWeights[i];
+        const radius = 8 + (degree / state.maxWeight) * 16;
         const dist = Math.hypot(node.x - x, node.y - y);
         if (dist <= radius + 6) {
           return i;
@@ -4507,6 +4893,9 @@
     const onDown = (event) => {
       const { x, y } = getPointer(event);
       const idx = findNodeAt(x, y);
+      state.pointerStart = { x, y, idx };
+      state.pointerMoved = false;
+      canvas.setPointerCapture(event.pointerId);
       if (idx !== null) {
         state.dragIndex = idx;
         state.dragOffset = { x: state.nodes[idx].x - x, y: state.nodes[idx].y - y };
@@ -4518,20 +4907,27 @@
         return;
       }
       const { x, y } = getPointer(event);
+      if (Math.hypot(x - state.pointerStart.x, y - state.pointerStart.y) > 5) state.pointerMoved = true;
       const node = state.nodes[state.dragIndex];
       node.x = Math.min(state.width - 20, Math.max(20, x + state.dragOffset.x));
       node.y = Math.min(state.height - 20, Math.max(20, y + state.dragOffset.y));
       drawNetwork(ctx, state);
     };
 
-    const onUp = () => {
+    const onUp = (event) => {
+      if (event.type !== "pointercancel" && state.pointerStart && !state.pointerMoved) {
+        const idx = state.pointerStart.idx;
+        state.selectedIndex = state.selectedIndex === idx ? null : idx;
+        state.onSelectionChange?.();
+      }
       state.dragIndex = null;
+      state.pointerStart = null;
     };
 
-    canvas.addEventListener("mousedown", onDown);
-    canvas.addEventListener("mousemove", onMove);
-    canvas.addEventListener("mouseup", onUp);
-    canvas.addEventListener("mouseleave", onUp);
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMove);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", onUp);
   }
 
   function attachNetworkToggle(canvas, toggleEl) {

@@ -848,7 +848,7 @@ button:hover {
 
 .network canvas {
   width: 100%;
-  height: 520px;
+  height: clamp(320px, 45vw, 520px);
   display: block;
   border-radius: 1rem;
   border: 1px solid var(--border);
@@ -892,7 +892,6 @@ button:hover {
     grid-template-columns: 1fr;
   }
 
-  .network canvas,
   .network-list {
     height: 420px;
   }
@@ -1146,3 +1145,66 @@ button:hover {
   display: block;
   margin-top: 0.35rem;
 }
+
+.relation-density { color: #263b48; }
+.relation-legend { font-size: .8rem; line-height: 1.6; }
+.relation-legend small { display: block; color: #454b43; }
+.summary-method { grid-column: 1 / -1; padding: 1rem; background: #fff; border: 1px solid var(--border); border-radius: 1rem; }
+.summary-method summary { cursor: pointer; font-weight: 600; }
+.summary-method p { max-width: 90ch; line-height: 1.6; }
+.network-controls { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 1rem 0; }
+.network-controls label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.network-controls select { max-width: 100%; }
+.network-controls output { min-width: 3ch; }
+.network canvas { touch-action: none; cursor: pointer; }
+.network-details { min-height: 3em; }
+
+.team-summary-header, .team-summary-wide { grid-column: 1 / -1; min-width: 0; }
+.team-summary-header h2 { margin-bottom: .3rem; }
+.team-summary-header label { display: flex; align-items: center; gap: .6rem; }
+.team-summary-header select { max-width: 100%; }
+.team-graph { padding: 1rem; background: #fff; border: 1px solid var(--border); border-radius: 1rem; }
+.team-graph > summary { cursor: pointer; font-weight: 600; }
+.team-community-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.team-community-legend > div { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.team-player-link { background: transparent; color: #245577; padding: .3rem .5rem; border: 1px solid #ccd6dc; border-radius: .4rem; text-align: left; }
+.team-player-link:hover { background: #eaf1f6; }
+.team-player-link:focus-visible { outline: 2px solid #245577; outline-offset: 2px; }
+.summary-card small { line-height: 1.5; }
+
+.summary-compact { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .6rem; margin-bottom: 1rem; }
+.summary-compact.hidden { display: none; }
+.summary-compact button { padding: .45rem .8rem; }
+.team-dashboard { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; min-width: 0; }
+.team-dashboard .summary-card { padding: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.team-dashboard .summary-card > strong { font-size: 1.5rem; }
+.team-dashboard .summary-card details { font-size: .9rem; }
+.team-dashboard .summary-card summary { cursor: pointer; }
+.team-dashboard .summary-card .team-player-link { margin-top: .4rem; }
+.view-panel, .view-container, .network, .network-controls { min-width: 0; }
+.network { grid-template-columns: minmax(0, 1fr); }
+.network canvas { max-width: 100%; }
+.dual-view { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.dual-view .team-dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  .team-dashboard { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dual-view { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 480px) {
+  .team-dashboard, .dual-view .team-dashboard { grid-template-columns: minmax(0, 1fr); }
+  .network-controls { align-items: stretch; }
+  .network-controls label { min-width: 0; width: 100%; }
+  .network-controls select { min-width: 0; width: 100%; }
+}
+
+.team-category-filters { display: flex; flex-wrap: wrap; gap: .5rem; }
+.team-category-filters button { background: #fff; color: var(--ink); border: 1px solid var(--border); padding: .5rem .9rem; }
+.team-category-filters button[aria-pressed="true"] { background: var(--accent-2); color: #fff; }
+.team-category-filters button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+.team-graph > h3, .summary-method > h3 { margin-top: 0; }
+
+.team-reading { grid-column: 1 / -1; padding: 1.1rem 1.3rem; border: 1px solid var(--border); border-left: 5px solid #687680; border-radius: .8rem; background: #f4f6f7; }
+.team-reading h3 { margin: 0 0 .6rem; font-size: 1.3rem; }
+.team-reading p { line-height: 1.55; margin: .6rem 0; max-width: 95ch; }
+.team-reading-connected { background: #edf4f8; border-left-color: #356784; }
+.team-reading-attention { background: #fff7e8; border-left-color: #95651f; }
